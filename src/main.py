@@ -705,52 +705,35 @@ def log_user_event(
     tokens_source: str = "",
 ) -> None:
     """
-    Пишет 1 событие в user_events. Никогда не кидает исключение наружу.
+    ?????????? 1 ?????????????? ?? user_events. ?????????????? ???? ???????????? ???????????????????? ????????????.
     """
     try:
-        conn = sqlite3.connect(DB_PATH)
-        try:
-            cur = conn.cursor()
-            cur.execute(
-                """
-                INSERT INTO user_events(
-                    ts, user_id, chat_id, username, first_name,
-                    event_type, mode, mode_from, mode_to,
-                    message_id, text_len,
-                    photo_provider, photo_model, ok, note,
-                    llm_provider, llm_model, prompt_tokens, completion_tokens, total_tokens, tokens_source
-                )
-                VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
-                """,
-                (
-                    int(ts), int(user_id), int(chat_id),
-                    (username or "").strip(),
-                    (first_name or "").strip(),
-                    (event_type or "").strip(),
-                    (mode or "").strip(),
-                    (mode_from or "").strip(),
-                    (mode_to or "").strip(),
-                    int(message_id or 0),
-                    int(text_len or 0),
-                    (photo_provider or "").strip(),
-                    (photo_model or "").strip(),
-                    1 if int(ok or 0) != 0 else 0,
-                    (note or "").strip(),
-
-                    (llm_provider or "").strip(),
-                    (llm_model or "").strip(),
-                    int(prompt_tokens or 0),
-                    int(completion_tokens or 0),
-                    int(total_tokens or 0),
-                    (tokens_source or "").strip(),
-                ),
-            )
-
-            conn.commit()
-        finally:
-            conn.close()
+        user_ref = legacy_user_ref(user_id)
+        DB_REPOSITORIES.append_legacy_user_event(
+            user_ref,
+            ts=ts,
+            chat_id=chat_id,
+            username=username,
+            first_name=first_name,
+            event_type=event_type,
+            mode=mode,
+            mode_from=mode_from,
+            mode_to=mode_to,
+            message_id=message_id,
+            text_len=text_len,
+            photo_provider=photo_provider,
+            photo_model=photo_model,
+            ok=ok,
+            note=note,
+            llm_provider=llm_provider,
+            llm_model=llm_model,
+            prompt_tokens=prompt_tokens,
+            completion_tokens=completion_tokens,
+            total_tokens=total_tokens,
+            tokens_source=tokens_source,
+        )
     except Exception:
-        # логирование не должно ломать бота
+        # ?????????????????????? ???? ???????????? ???????????? ????????
         pass
 
 

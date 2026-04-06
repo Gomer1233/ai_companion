@@ -924,6 +924,72 @@ class SQLiteRepositories:
         finally:
             conn.close()
 
+
+    def append_legacy_user_event(
+        self,
+        user_ref: UserRef,
+        *,
+        ts: int,
+        chat_id: int = 0,
+        username: str = "",
+        first_name: str = "",
+        event_type: str,
+        mode: str = "",
+        mode_from: str = "",
+        mode_to: str = "",
+        message_id: int = 0,
+        text_len: int = 0,
+        photo_provider: str = "",
+        photo_model: str = "",
+        ok: int = 1,
+        note: str = "",
+        llm_provider: str = "",
+        llm_model: str = "",
+        prompt_tokens: int = 0,
+        completion_tokens: int = 0,
+        total_tokens: int = 0,
+        tokens_source: str = "",
+    ) -> None:
+        user_id = self._user_id(user_ref)
+        conn = self._connect()
+        try:
+            conn.execute(
+                """
+                INSERT INTO user_events(
+                    ts, user_id, chat_id, username, first_name,
+                    event_type, mode, mode_from, mode_to,
+                    message_id, text_len,
+                    photo_provider, photo_model, ok, note,
+                    llm_provider, llm_model, prompt_tokens, completion_tokens, total_tokens, tokens_source
+                )
+                VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
+                """,
+                (
+                    int(ts), int(user_id), int(chat_id),
+                    (username or "").strip(),
+                    (first_name or "").strip(),
+                    (event_type or "").strip(),
+                    (mode or "").strip(),
+                    (mode_from or "").strip(),
+                    (mode_to or "").strip(),
+                    int(message_id or 0),
+                    int(text_len or 0),
+                    (photo_provider or "").strip(),
+                    (photo_model or "").strip(),
+                    1 if int(ok or 0) != 0 else 0,
+                    (note or "").strip(),
+                    (llm_provider or "").strip(),
+                    (llm_model or "").strip(),
+                    int(prompt_tokens or 0),
+                    int(completion_tokens or 0),
+                    int(total_tokens or 0),
+                    (tokens_source or "").strip(),
+                ),
+            )
+            conn.commit()
+        finally:
+            conn.close()
+
     def reset_conversation(self, user_ref: UserRef, conversation_ref: ConversationRef) -> None:
         user_id = self._user_id(user_ref)
         now_ts = self._now()
