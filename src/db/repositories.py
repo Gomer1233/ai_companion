@@ -352,6 +352,184 @@ class SQLiteRepositories:
             return conversation.active_mode
         return "basic"
 
+
+    def get_active_dialog_stats(self, user_ref: UserRef) -> dict[str, int]:
+        user_id = self._user_id(user_ref)
+        conn = self._connect()
+        try:
+            rows = conn.execute(
+                """
+                SELECT mode, COUNT(*) as cnt
+                FROM user_messages
+                WHERE user_id = ?
+                GROUP BY mode
+                """,
+                (user_id,),
+            ).fetchall()
+        finally:
+            conn.close()
+        return {str(mode): int(count) for mode, count in rows if mode}
+
+    def get_user_profile(self, user_ref: UserRef) -> dict[str, str]:
+        user_id = self._user_id(user_ref)
+        conn = self._connect()
+        try:
+            row = conn.execute(
+                """
+                SELECT
+                  preferred_name,
+                  preferred_title,
+                  COALESCE(mode, ''),
+                  COALESCE(chat_locked, 0),
+                  COALESCE(mode_picked, 0),
+                  COALESCE(lock_reason, '')
+                FROM user_profile
+                WHERE user_id = ?
+                """,
+                (user_id,),
+            ).fetchone()
+        finally:
+            conn.close()
+        if not row:
+            return {
+                "preferred_name": "",
+                "preferred_title": "",
+                "mode": "",
+                "mode_picked": "0",
+                "chat_locked": "0",
+                "lock_reason": "",
+            }
+        return {
+            "preferred_name": str(row[0] or ""),
+            "preferred_title": str(row[1] or ""),
+            "mode": str(row[2] or ""),
+            "chat_locked": str(int(row[3] or 0)),
+            "mode_picked": str(int(row[4] or 0)),
+            "lock_reason": str(row[5] or ""),
+        }
+
+    def set_user_profile(
+        self,
+        user_ref: UserRef,
+        *,
+        preferred_name: str | None = None,
+        preferred_title: str | None = None,
+        mode: str | None = None,
+    ) -> None:
+        user_id = self._user_id(user_ref)
+        conn = self._connect()
+        try:
+            conn.execute(
+                """
+                INSERT INTO user_profile(user_id, preferred_name, preferred_title, mode)
+                VALUES(?,?,?,?)
+                ON CONFLICT(user_id) DO UPDATE SET
+                  preferred_name = COALESCE(excluded.preferred_name, user_profile.preferred_name),
+                  preferred_title = COALESCE(excluded.preferred_title, user_profile.preferred_title),
+                  mode = COALESCE(excluded.mode, user_profile.mode)
+                """,
+                (user_id, preferred_name, preferred_title, mode),
+            )
+            conn.commit()
+        finally:
+            conn.close()
+
+    def set_mode_picked(self, user_ref: UserRef, picked: bool) -> None:
+        user_id = self._user_id(user_ref)
+        conn = self._connect()
+        try:
+            conn.execute(
+                """
+                INSERT INTO user_profile(user_id, preferred_name, preferred_title, mode, mode_picked)
+                VALUES(?,?,?,?,?)
+                ON CONFLICT(user_id) DO UPDATE SET
+                  mode_picked=excluded.mode_picked
+                """,
+                (user_id, "", "", "basic", 1 if picked else 0),
+            )
+            conn.commit()
+        finally:
+            conn.close()
+
+    def lock_chat(self, user_ref: UserRef, reason: str = "") -> None:
+        user_id = self._user_id(user_ref)
+        conn = self._connect()
+        try:
+            conn.execute(
+                "INSERT OR IGNORE INTO user_profile(user_id, preferred_name, preferred_title, mode) VALUES(?,?,?,?)",
+                (user_id, "", "", "basic"),
+            )
+            conn.execute(
+                """
+                UPDATE user_profile
+                SET chat_locked = 1,
+                    lock_reason = ?
+                WHERE user_id = ?
+                """,
+                (reason or "", user_id),
+            )
+            conn.commit()
+        finally:
+            conn.close()
+
+    def unlock_chat(self, user_ref: UserRef) -> None:
+        user_id = self._user_id(user_ref)
+        conn = self._connect()
+        try:
+            conn.execute(
+                """
+                UPDATE user_profile
+                SET chat_locked = 0,
+                    lock_reason = ''
+                WHERE user_id = ?
+                """,
+                (user_id,),
+            )
+            conn.commit()
+        finally:
+            conn.close()
+
+    def get_user_model(self, user_ref: UserRef, *, default_model: str) -> str:
+        user_id = self._user_id(user_ref)
+        conn = self._connect()
+        try:
+            row = conn.execute(
+                "SELECT model FROM user_settings WHERE user_id = ?",
+                (user_id,),
+            ).fetchone()
+            if row and row[0]:
+                return str(row[0])
+            conn.execute(
+                """
+                INSERT INTO user_settings(user_id, model)
+                VALUES(?, ?)
+                ON CONFLICT(user_id) DO UPDATE SET
+                  model=excluded.model
+                """,
+                (user_id, default_model),
+            )
+            conn.commit()
+            return default_model
+        finally:
+            conn.close()
+
+    def set_user_model(self, user_ref: UserRef, model: str) -> None:
+        user_id = self._user_id(user_ref)
+        conn = self._connect()
+        try:
+            conn.execute(
+                """
+                INSERT INTO user_settings(user_id, model)
+                VALUES(?, ?)
+                ON CONFLICT(user_id) DO UPDATE SET
+                  model=excluded.model
+                """,
+                (user_id, model),
+            )
+            conn.commit()
+        finally:
+            conn.close()
+
     def load_mode_state(
         self,
         user_ref: UserRef,

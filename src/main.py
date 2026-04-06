@@ -755,48 +755,12 @@ def log_user_event(
 
 
 def get_user_model(user_id: int) -> str:
-    conn = sqlite3.connect(DB_PATH)
-    try:
-        cur = conn.cursor()
-        cur.execute("SELECT model FROM user_settings WHERE user_id = ?", (user_id,))
-        row = cur.fetchone()
-        if row and row[0]:
-            return row[0]
-
-        # НЕ REPLACE: обновляем только model
-        cur.execute(
-            """
-            INSERT INTO user_settings(user_id, model)
-            VALUES(?, ?)
-            ON CONFLICT(user_id) DO UPDATE SET
-              model=excluded.model
-            """,
-            (user_id, DEFAULT_MODEL),
-        )
-        conn.commit()
-        return DEFAULT_MODEL
-    finally:
-        conn.close()
-
+    user_ref = legacy_user_ref(user_id)
+    return DB_REPOSITORIES.get_user_model(user_ref, default_model=DEFAULT_MODEL)
 
 def set_user_model(user_id: int, model: str) -> None:
-    conn = sqlite3.connect(DB_PATH)
-    try:
-        cur = conn.cursor()
-        # НЕ REPLACE: обновляем только model
-        cur.execute(
-            """
-            INSERT INTO user_settings(user_id, model)
-            VALUES(?, ?)
-            ON CONFLICT(user_id) DO UPDATE SET
-              model=excluded.model
-            """,
-            (user_id, model),
-        )
-        conn.commit()
-    finally:
-        conn.close()
-
+    user_ref = legacy_user_ref(user_id)
+    DB_REPOSITORIES.set_user_model(user_ref, model)
 
 async def generate_image_backend(prompt: str) -> bytes:
     """
@@ -836,23 +800,9 @@ def get_history(user_id: int, mode: str) -> List[Dict[str, Any]]:
     return DB_REPOSITORIES.load_history(user_ref, conversation_ref, mode)
 
 def get_active_dialog_stats(user_id: int) -> dict[str, int]:
-    """Сколько сообщений накоплено по каждому mode в user_messages."""
-    conn = sqlite3.connect(DB_PATH)
-    try:
-        cur = conn.cursor()
-        cur.execute(
-            """
-            SELECT mode, COUNT(*) as cnt
-            FROM user_messages
-            WHERE user_id = ?
-            GROUP BY mode
-            """,
-            (user_id,),
-        )
-        return {m: int(c) for (m, c) in cur.fetchall() if m}
-    finally:
-        conn.close()
-
+    """?????????????? ?????????????????? ?????????????????? ???? ?????????????? mode ?? user_messages."""
+    user_ref = legacy_user_ref(user_id)
+    return DB_REPOSITORIES.get_active_dialog_stats(user_ref)
 
 def get_photo_gate(user_id: int) -> Dict[str, int]:
     user_ref, conversation_ref = _repo_refs(user_id)
@@ -886,41 +836,8 @@ def upsert_photo_gate(
     )
 
 def get_user_profile(user_id: int) -> Dict[str, str]:
-    conn = sqlite3.connect(DB_PATH)
-    try:
-        cur = conn.cursor()
-        cur.execute("""
-            SELECT
-              preferred_name,
-              preferred_title,
-              COALESCE(mode, ''),
-              COALESCE(chat_locked, 0),
-              COALESCE(mode_picked, 0),
-              COALESCE(lock_reason, '')
-            FROM user_profile
-            WHERE user_id = ?
-        """, (user_id,))
-        row = cur.fetchone()
-        if not row:
-            return {
-                "preferred_name": "",
-                "preferred_title": "",
-                "mode": "",
-                "mode_picked": "0",
-                "chat_locked": "0",
-                "lock_reason": "",
-            }
-        return {
-            "preferred_name": row[0] or "",
-            "preferred_title": row[1] or "",
-            "mode": row[2] or "",
-            "chat_locked": str(int(row[3] or 0)),
-            "mode_picked": str(int(row[4] or 0)),
-            "lock_reason": row[5] or "",
-        }
-
-    finally:
-        conn.close()
+    user_ref = legacy_user_ref(user_id)
+    return DB_REPOSITORIES.get_user_profile(user_ref)
 
 GAME_OVER_MARKER = "[[GAME_OVER]]"
 
@@ -948,35 +865,12 @@ def strip_game_over_markers(text: str) -> tuple[str, bool]:
 
 
 def lock_chat(user_id: int, reason: str = "") -> None:
-    conn = sqlite3.connect(DB_PATH)
-    try:
-        cur = conn.cursor()
-        # гарантируем строку в user_profile, чтобы UPDATE не был пустым
-        cur.execute("INSERT OR IGNORE INTO user_profile(user_id, preferred_name, preferred_title, mode) VALUES(?,?,?,?)",
-                    (user_id, "", "", "basic"))
-        cur.execute("""
-            UPDATE user_profile
-            SET chat_locked = 1,
-                lock_reason = ?
-            WHERE user_id = ?
-        """, (reason or "", user_id))
-        conn.commit()
-    finally:
-        conn.close()
+    user_ref = legacy_user_ref(user_id)
+    DB_REPOSITORIES.lock_chat(user_ref, reason)
 
 def unlock_chat(user_id: int) -> None:
-    conn = sqlite3.connect(DB_PATH)
-    try:
-        cur = conn.cursor()
-        cur.execute("""
-            UPDATE user_profile
-            SET chat_locked = 0,
-                lock_reason = ''
-            WHERE user_id = ?
-        """, (user_id,))
-        conn.commit()
-    finally:
-        conn.close()
+    user_ref = legacy_user_ref(user_id)
+    DB_REPOSITORIES.unlock_chat(user_ref)
 
 def is_chat_locked(profile: Dict[str, str]) -> tuple[bool, str]:
     locked = int(profile.get("chat_locked") or "0") == 1
@@ -1004,38 +898,18 @@ def set_user_profile(
     preferred_title: str | None = None,
     mode: str | None = None,
 ) -> None:
-    conn = sqlite3.connect(DB_PATH)
-    try:
-        cur = conn.cursor()
-        cur.execute("""
-            INSERT INTO user_profile(user_id, preferred_name, preferred_title, mode)
-            VALUES(?,?,?,?)
-            ON CONFLICT(user_id) DO UPDATE SET
-              preferred_name = COALESCE(excluded.preferred_name, user_profile.preferred_name),
-              preferred_title = COALESCE(excluded.preferred_title, user_profile.preferred_title),
-              mode = COALESCE(excluded.mode, user_profile.mode)
-        """, (user_id, preferred_name, preferred_title, mode))
-        conn.commit()
-    finally:
-        conn.close()
+    user_ref = legacy_user_ref(user_id)
+    DB_REPOSITORIES.set_user_profile(
+        user_ref,
+        preferred_name=preferred_name,
+        preferred_title=preferred_title,
+        mode=mode,
+    )
 
 
 def set_mode_picked(user_id: int, picked: bool) -> None:
-    conn = sqlite3.connect(DB_PATH)
-    try:
-        cur = conn.cursor()
-        cur.execute(
-            """
-            INSERT INTO user_profile(user_id, preferred_name, preferred_title, mode, mode_picked)
-            VALUES(?,?,?,?,?)
-            ON CONFLICT(user_id) DO UPDATE SET
-              mode_picked=excluded.mode_picked
-            """,
-            (user_id, "", "", "basic", 1 if picked else 0),
-        )
-        conn.commit()
-    finally:
-        conn.close()
+    user_ref = legacy_user_ref(user_id)
+    DB_REPOSITORIES.set_mode_picked(user_ref, picked)
 
 def default_mode_state(mode: str) -> Dict[str, Any]:
     return {

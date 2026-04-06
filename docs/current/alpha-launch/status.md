@@ -27,10 +27,11 @@
 - ALPHA-001 started with shared runtime helper extraction out of `src/main.py` and `src/core/legacy_runtime.py`
 - `src/main.py` history, photo gate, mode state, and mode lock wrappers now route through `SQLiteRepositories` instead of ad hoc launcher SQL
 - mode switch and reset flows in `src/main.py` now use repository-backed conversation reset/active-mode paths, with legacy relationship cleanup left as an explicit hook
+- remaining launcher profile/settings/chat-lock helpers in `src/main.py` now route through `SQLiteRepositories`; direct SQLite usage is down to bootstrap/event logging paths
 
 ## Next Step
 
-Continue `ALPHA-001 Finish Refactor + Boundaries` by addressing the remaining launcher-owned profile/settings helpers and extracting more orchestration out of `src/main.py`.
+Continue `ALPHA-001 Finish Refactor + Boundaries` by extracting more launcher orchestration out of `src/main.py` and deciding whether bootstrap/event logging DB access stays local or also moves behind adapters.
 
 ## Risks / Notes
 
