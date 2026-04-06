@@ -1,0 +1,193 @@
+from __future__ import annotations
+
+from pathlib import Path
+
+import pytest
+
+from src.app.provider_registry import ProviderRegistry
+from src.app.settings import Settings
+from src.app.variants import MAIN_APP_VARIANT, TELEGRAM_CHANNEL_CONFIG
+from src.core.contracts import (
+    AnalyticsEvent,
+    AnalyticsEventType,
+    ConversationRecord,
+    ConversationRef,
+    ConversationStatus,
+    CoreResponse,
+    DeferredJob,
+    InboundEvent,
+    InboundEventType,
+    JobStatus,
+    JobType,
+    OutboundItem,
+    OutboundItemType,
+    UserRef,
+    resolve_current_conversation,
+    validate_default_conversations,
+)
+
+
+def test_settings_from_env_parses_values() -> None:
+    settings = Settings.from_env(
+        {
+            "TELEGRAM_TOKEN": "tg-token",
+            "OPENROUTER_API_KEY": "or-key",
+            "OPENAI_API_KEY": "oa-key",
+            "IMAGE_BACKEND_PROVIDER": "TOGETHER",
+            "TOG_API_KEY": "tog-key",
+            "TOG_WIDTH": "2048",
+            "TOG_HEIGHT": "1536",
+            "PROMPT_TRANSLATION_ENABLED": "true",
+            "PROMPT_TRANSLATION_FOR": "modelslab, together",
+            "JUDGE_MAX_TOKENS": "333",
+            "MAX_AUTO_CONTINUATIONS": "5",
+        },
+        project_root=Path("D:/projects/Lina_AI"),
+    )
+
+    assert settings.telegram_token == "tg-token"
+    assert settings.image_backend_provider == "together"
+    assert settings.tog_width == 2048
+    assert settings.tog_height == 1536
+    assert settings.prompt_translation_enabled is True
+    assert settings.prompt_translation_for == {"modelslab", "together"}
+    assert settings.judge_max_tokens == 333
+    assert settings.max_auto_continuations == 5
+    assert settings.bot_db_path.endswith("bot_state.db")
+
+
+def test_provider_registry_validates_supported_provider_matrix() -> None:
+    settings = Settings.from_env(
+        {
+            "TELEGRAM_TOKEN": "tg-token",
+            "OPENAI_API_KEY": "oa-key",
+            "IMAGE_BACKEND_PROVIDER": "openai",
+        }
+    )
+
+    registry = ProviderRegistry.default()
+    registry.validate_startup(settings, MAIN_APP_VARIANT, TELEGRAM_CHANNEL_CONFIG)
+
+
+def test_provider_registry_rejects_unsupported_provider() -> None:
+    settings = Settings.from_env(
+        {
+            "TELEGRAM_TOKEN": "tg-token",
+            "IMAGE_BACKEND_PROVIDER": "replicate",
+        }
+    )
+
+    registry = ProviderRegistry.default()
+    with pytest.raises(RuntimeError, match="Unsupported IMAGE_BACKEND_PROVIDER"):
+        registry.validate_startup(settings, MAIN_APP_VARIANT, TELEGRAM_CHANNEL_CONFIG)
+
+
+def test_inbound_event_requires_expected_fields() -> None:
+    user_ref = UserRef("user-1")
+    conversation_ref = ConversationRef("conv-1")
+
+    event = InboundEvent(
+        event_type=InboundEventType.USER_TEXT,
+        user_ref=user_ref,
+        conversation_ref=conversation_ref,
+        text="hello",
+    )
+    assert event.text == "hello"
+
+    with pytest.raises(ValueError, match="requires text"):
+        InboundEvent(
+            event_type=InboundEventType.USER_TEXT,
+            user_ref=user_ref,
+            conversation_ref=conversation_ref,
+        )
+
+    with pytest.raises(ValueError, match="requires mode"):
+        InboundEvent(
+            event_type=InboundEventType.SWITCH_MODE,
+            user_ref=user_ref,
+            conversation_ref=conversation_ref,
+        )
+
+
+def test_core_response_preserves_item_order() -> None:
+    response = CoreResponse(
+        items=[
+            OutboundItem(item_type=OutboundItemType.TEXT, text="first"),
+            OutboundItem(item_type=OutboundItemType.IMAGE, media_ref="image-1"),
+            OutboundItem(item_type=OutboundItemType.ACTION, action="select_mode"),
+        ]
+    )
+
+    assert [item.item_type for item in response.items] == [
+        OutboundItemType.TEXT,
+        OutboundItemType.IMAGE,
+        OutboundItemType.ACTION,
+    ]
+
+
+def test_deferred_job_cancelled_is_terminal() -> None:
+    job = DeferredJob(
+        job_id="job-1",
+        user_ref=UserRef("user-1"),
+        conversation_ref=ConversationRef("conv-1"),
+        mode="basic",
+        job_type=JobType.IMAGE,
+        status=JobStatus.CANCELLED,
+        progress=100,
+    )
+
+    assert job.can_transition_to(JobStatus.CANCELLED) is True
+    assert job.can_transition_to(JobStatus.COMPLETED) is False
+    assert job.can_transition_to(JobStatus.FAILED) is False
+
+    with pytest.raises(ValueError, match="Invalid job status transition"):
+        job.with_status(JobStatus.COMPLETED)
+
+
+def test_conversation_lifecycle_helpers_enforce_single_default() -> None:
+    user_ref = UserRef("user-1")
+    archived = ConversationRecord(
+        user_ref=user_ref,
+        conversation_ref=ConversationRef("conv-archived"),
+        active_mode="basic",
+        status=ConversationStatus.ARCHIVED,
+        is_default=True,
+    )
+    active = ConversationRecord(
+        user_ref=user_ref,
+        conversation_ref=ConversationRef("conv-active"),
+        active_mode="chef",
+        status=ConversationStatus.ACTIVE,
+    )
+
+    assert archived.accepts_events is False
+    assert resolve_current_conversation([archived, active]) == active
+
+    with pytest.raises(ValueError, match="more than one default conversation"):
+        validate_default_conversations(
+            [
+                archived,
+                ConversationRecord(
+                    user_ref=user_ref,
+                    conversation_ref=ConversationRef("conv-default-2"),
+                    active_mode="basic",
+                    is_default=True,
+                ),
+            ]
+        )
+
+
+def test_analytics_event_keeps_optional_conversation_context() -> None:
+    event = AnalyticsEvent(
+        event_type=AnalyticsEventType.IMAGE_REQUESTED,
+        user_ref=UserRef("user-1"),
+        conversation_ref=ConversationRef("conv-1"),
+        mode="basic",
+        job_id="job-1",
+        ts=123,
+        ok=True,
+        note="queued",
+    )
+
+    assert event.job_id == "job-1"
+    assert event.mode == "basic"

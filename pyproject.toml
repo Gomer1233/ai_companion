@@ -1,0 +1,30 @@
+[tool.ruff]
+target-version = "py311"
+line-length = 120
+
+[tool.ruff.lint]
+select = [
+  "E",
+  "F",
+  "I",
+]
+ignore = [
+  "E402",
+]
+
+[tool.ruff.lint.isort]
+known-first-party = ["src", "tests"]
+
+[tool.mypy]
+python_version = "3.11"
+warn_unused_configs = true
+ignore_missing_imports = true
+check_untyped_defs = false
+pretty = true
+show_error_codes = true
+files = [
+  "src/app",
+  "src/core",
+  "src/db",
+  "src/adapters",
+]

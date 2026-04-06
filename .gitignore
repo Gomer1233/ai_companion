@@ -1,0 +1,64 @@
+# Python
+__pycache__/
+*.py[cod]
+*.pyo
+*.pyd
+.Python
+env/
+venv/
+.venv/
+*.so
+*.egg
+*.egg-info/
+dist/
+build/
+
+# Environment variables
+.env
+.env.local
+.env.*.local
+.local/
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# Database files
+*.db
+*.sqlite
+*.sqlite3
+bot_state.db
+lina.db
+
+# Logs and reports
+logs/
+*.log
+*.xlsx
+*.xls
+gate.log
+.pytest_cache/
+
+# Media files
+src/Photo/
+*.mp4
+*.zip
+*.jpg
+*.png
+*.jpeg
+*.gif
+
+# OS
+.DS_Store
+Thumbs.db
+desktop.ini
+
+# Archive (old files) - включен в репозиторий для истории
+# archive/
+
+# Test files with secrets
+Тесты/1.env
+.env.7z
+.cursor/

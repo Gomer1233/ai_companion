@@ -1,0 +1,13 @@
+﻿# Archived docs and legacy source trees should not appear in normal searches.
+docs/archive/**
+archive/**
+Архив ботов/**
+.local/**
+logs/**
+.pytest_cache/**
+.env
+.env.7z
+*.db
+*.log
+src/Photo/**
+
