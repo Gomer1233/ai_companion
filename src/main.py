@@ -47,6 +47,7 @@ from src.prompts.relationship import (
     check_ghosting,
 )
 from src.prompts.lika_prompt import build_lika_system_prompt
+from src.app.settings import Settings
 from src.core.runtime_helpers import (
     call_openrouter_with_meta as shared_call_openrouter_with_meta,
     chunk_text,
@@ -58,6 +59,8 @@ from src.core.runtime_helpers import (
     strip_internal_thoughts,
     strip_scene_contract,
 )
+from src.core.image_service import ImageService
+from src.db.migrations import migrate_database
 from src.db.repositories import SQLiteRepositories, legacy_user_ref
 
 # ----------------------------
@@ -344,115 +347,6 @@ async def send_random_photo(message: types.Message) -> None:
         return
     await message.answer_photo(FSInputFile(str(photo_path)))
 
-_translation_cache: dict[str, str] = {}
-
-async def translate_to_english(text: str) -> str:
-    if PROMPT_TRANSLATION_DEBUG:
-        logging.info("[translate][start] len=%s OPENAI_API_KEY=%s model=%s",
-                    len(text or ""), "SET" if OPENAI_API_KEY else "MISSING", TRANSLATION_MODEL)
-
-    # простая защита от повторов и лишних затрат
-    key = text.strip()
-    if not key:
-        return text
-    if key in _translation_cache:
-        return _translation_cache[key]
-
-    if not OPENAI_API_KEY:
-        if PROMPT_TRANSLATION_DEBUG:
-            logging.info("[translate][skip] OPENAI_API_KEY missing -> returning original")
-        return text
-
-
-    url = "https://api.openai.com/v1/chat/completions"
-    headers = {
-        "Authorization": f"Bearer {OPENAI_API_KEY}",
-        "Content-Type": "application/json",
-    }
-
-    system = (
-        "You are a translation engine. Translate the user's text to natural English.\n"
-        "Rules:\n"
-        "- Return ONLY the translated text, no quotes, no explanations.\n"
-        "- Preserve formatting, line breaks, punctuation.\n"
-        "- Do NOT translate code, model IDs, LoRA names, URLs, tokens, weights like (word:1.2).\n"
-        "- Keep proper nouns as-is.\n"
-    )
-
-    payload = {
-        "model": TRANSLATION_MODEL,
-        "messages": [
-            {"role": "system", "content": system},
-            {"role": "user", "content": text},
-        ],
-        "temperature": 0,
-    }
-
-    async with httpx.AsyncClient(timeout=60.0) as client:
-        r = await client.post(url, headers=headers, json=payload)
-
-    if r.status_code >= 400:
-        # не валим генерацию, просто вернём оригинал
-        logging.warning("Translation failed HTTP %s: %s", r.status_code, (r.text or "")[:300])
-        return text
-
-    data = r.json()
-    out = (data["choices"][0]["message"]["content"] or "").strip()
-    if out:
-        _translation_cache[key] = out
-        return out
-    return text
-
-
-async def maybe_translate_prompt(provider: str, prompt: str) -> str:
-    if PROMPT_TRANSLATION_DEBUG:
-        logging.info("[translate][enter] provider=%s enabled=%s target=%s for=%s",
-                    provider, PROMPT_TRANSLATION_ENABLED, PROMPT_TRANSLATION_TARGET_LANG, PROMPT_TRANSLATION_FOR)
-
-    if not PROMPT_TRANSLATION_ENABLED:
-        return prompt
-
-    p = provider.strip().lower()
-    if p not in PROMPT_TRANSLATION_FOR:
-        return prompt
-
-    if PROMPT_TRANSLATION_TARGET_LANG.lower() != "en":
-        return prompt
-
-    translated = await translate_to_english(prompt)
-    if PROMPT_TRANSLATION_DEBUG:
-        ru = (prompt or "").strip()
-        en = (translated or "").strip()
-        logging.info(
-            "\n========== TRANSLATION DEBUG ==========\n"
-            "provider=%s\n"
-            "RU:\n%s\n"
-            "EN:\n%s\n"
-            "same=%s\n"
-            "======================================",
-            p,
-            ru[:1200],
-            en[:1200],
-            str(ru == en)
-        )
-
-
-    if PROMPT_TRANSLATION_DEBUG:
-        ru = (prompt or "").strip()
-        en = (translated or "").strip()
-        if ru and en and en != ru:
-            logging.info(
-                "\n========== TRANSLATION DEBUG ==========\n"
-                "provider=%s\n"
-                "RU:\n%s\n"
-                "EN:\n%s\n"
-                "======================================",
-                p, ru, en
-            )
-
-    return translated
-
-
 # ----------------------------
 # DB
 # ----------------------------
@@ -580,6 +474,7 @@ def ensure_user_events_schema(cur: sqlite3.Cursor) -> None:
 
 
 def init_db() -> None:
+    migrate_database(DB_PATH, include_relationship_state=True)
     conn = sqlite3.connect(DB_PATH)
     try:
         cur = conn.cursor()
@@ -745,29 +640,16 @@ def set_user_model(user_id: int, model: str) -> None:
     user_ref = legacy_user_ref(user_id)
     DB_REPOSITORIES.set_user_model(user_ref, model)
 
+APP_SETTINGS = Settings.from_env(project_root=PROJECT_ROOT)
+IMAGE_SERVICE = ImageService(settings=APP_SETTINGS, openrouter_client=openrouter_client)
+
+
+def _image_analytics_context() -> tuple[str, str]:
+    return IMAGE_SERVICE.analytics_context()
+
+
 async def generate_image_backend(prompt: str) -> bytes:
-    """
-    Единственная точка входа для генерации картинки.
-    Переключается только через IMAGE_BACKEND_PROVIDER и env-переменные.
-    """
-    provider = (IMAGE_BACKEND_PROVIDER or "openrouter").strip().lower()
-
-    if provider == "openai":
-        return await openai_generate_image(prompt, model_override=OPENAI_IMAGE_MODEL)
-
-    if provider == "openrouter":
-        return await openrouter_generate_image(prompt, OPENROUTER_IMAGE_MODEL)
-
-    if provider == "modelslab":
-        return await modelslab_generate_image(prompt)
-    
-    if provider == "together":
-        return await together_generate_image(prompt, model=TOG_IMAGE_MODEL)
-    
-    if provider == "replicate":
-        raise RuntimeError("replicate backend not implemented yet")
-
-    raise RuntimeError(f"Unknown IMAGE_BACKEND_PROVIDER={provider}")
+    return await IMAGE_SERVICE.generate_image(prompt)
 
 
 def clear_history(user_id: int, mode: str | None = None) -> None:
@@ -1091,238 +973,6 @@ async def openai_tts(text: str) -> bytes:
 
     return r.content
 
-async def openai_generate_image(prompt: str, model_override: str | None = None) -> bytes:
-    if not OPENAI_API_KEY:
-        raise RuntimeError("Missing env OPENAI_API_KEY")
-
-    url = "https://api.openai.com/v1/images/generations"
-    headers = {
-        "Authorization": f"Bearer {OPENAI_API_KEY}",
-        "Content-Type": "application/json",
-    }
-
-    model_to_use = (model_override or OPENAI_IMAGE_MODEL).strip()
-
-    payload = {
-        "model": model_to_use,
-        "prompt": prompt,
-        "size": OPENAI_IMAGE_SIZE,
-        "n": 1,
-    }
-
-    async with httpx.AsyncClient(timeout=120.0) as client:
-        r = await client.post(url, headers=headers, json=payload)
-
-    if r.status_code >= 400:
-        body_preview = (r.text or "")[:400]
-        raise RuntimeError(f"OpenAI Images HTTP {r.status_code}: {body_preview}")
-
-    data = r.json()
-    b64 = data["data"][0]["b64_json"]
-    return base64.b64decode(b64)
-
-
-def _data_url_to_bytes(data_url: str) -> bytes:
-    # ожидаем "data:image/png;base64,AAAA..."
-    if not data_url or not data_url.startswith("data:"):
-        raise RuntimeError("OpenRouter returned non-data-url image")
-
-    try:
-        header, b64 = data_url.split(",", 1)
-    except ValueError:
-        raise RuntimeError("Malformed data URL")
-
-    return base64.b64decode(b64)
-
-async def modelslab_generate_image(prompt: str) -> bytes:
-    
-    if not MODELSLAB_API_KEY:
-        raise RuntimeError("Missing MODELSLAB_API_KEY")
-    if not MODELSLAB_MODEL_ID:
-        raise RuntimeError("Missing MODELSLAB_MODEL_ID")
-    
-    prompt = await maybe_translate_prompt("modelslab", prompt)
-    negative = await maybe_translate_prompt("modelslab", MODELSLAB_NEGATIVE_PROMPT)
-
-    payload = {
-        "key": MODELSLAB_API_KEY,
-        "prompt": prompt,
-        "model_id": MODELSLAB_MODEL_ID,
-        "width": str(MODELSLAB_WIDTH),
-        "height": str(MODELSLAB_HEIGHT),
-        "negative_prompt": negative,
-        "num_inference_steps": str(MODELSLAB_STEPS),
-        "scheduler": MODELSLAB_SCHEDULER,
-        "guidance_scale": str(MODELSLAB_GUIDANCE),
-        "enhance_prompt": MODELSLAB_ENHANCE_PROMPT,
-    }
-    if MODELSLAB_LORA_MODEL:
-        payload["lora_model"] = MODELSLAB_LORA_MODEL
-
-    async with httpx.AsyncClient(timeout=180.0) as client:
-        r = await client.post(MODELSLAB_TEXT2IMG_URL, json=payload)
-
-    if r.status_code >= 400:
-        raise RuntimeError(f"ModelsLab HTTP {r.status_code}: {(r.text or '')[:600]}")
-
-    data = r.json()
-
-    # 1) Если output уже есть — берём сразу
-    urls = data.get("output") or data.get("proxy_links") or []
-    if urls:
-        return await _download_image_bytes(urls[0])
-
-    # 2) Часто future_links уже содержит прямую ссылку на файл — пробуем
-    future = data.get("future_links") or []
-    if future:
-        try:
-            return await _download_image_bytes(future[0])
-        except Exception:
-            # если ещё не готово — идём в fetch
-            pass
-
-    # 3) Если статус processing — polling через fetch_result
-    status = (data.get("status") or "").lower()
-    fetch_url = data.get("fetch_result")
-    if status == "processing" and fetch_url:
-        eta = data.get("eta") or 5
-
-        for _ in range(12):
-            await asyncio.sleep(int(eta))
-
-            async with httpx.AsyncClient(timeout=180.0) as client:
-                rr = await client.post(fetch_url, json={"key": MODELSLAB_API_KEY})
-
-            if rr.status_code >= 400:
-                raise RuntimeError(f"ModelsLab fetch HTTP {rr.status_code}: {(rr.text or '')[:400]}")
-
-            d2 = rr.json()
-
-            urls2 = d2.get("output") or d2.get("proxy_links") or []
-            if urls2:
-                return await _download_image_bytes(urls2[0])
-
-            future2 = d2.get("future_links") or []
-            if future2:
-                try:
-                    return await _download_image_bytes(future2[0])
-                except Exception:
-                    pass
-
-            eta = d2.get("eta") or eta
-
-        raise RuntimeError(f"ModelsLab: timeout waiting for image. Last response: {str(d2)[:800]}")
-
-
-    raise RuntimeError(f"ModelsLab: no image urls in response: {str(data)[:800]}")
-
-
-async def _download_image_bytes(url: str) -> bytes:
-    async with httpx.AsyncClient(timeout=120.0) as client:
-        r = await client.get(url)
-    if r.status_code >= 400:
-        raise RuntimeError(f"Image download failed HTTP {r.status_code}: {url}")
-    return r.content
-
-async def together_generate_image(prompt: str, model: str | None = None) -> bytes:
-    if not TOG_API_KEY:
-        raise RuntimeError("Missing env TOG_API_KEY")
-
-    base_url = (TOG_BASE_URL or "https://api.together.xyz/v1").rstrip("/")
-    url = f"{base_url}/images/generations"
-    headers = {
-        "Authorization": f"Bearer {TOG_API_KEY}",
-        "Content-Type": "application/json",
-    }
-
-    model_to_use = (model or TOG_IMAGE_MODEL).strip()
-
-    payload = {
-        "model": model_to_use,
-        "prompt": prompt,
-        "n": 1,
-        "width": int(TOG_WIDTH),
-        "height": int(TOG_HEIGHT),
-    }
-
-    # retry на 503/429 — у тебя уже всплывало "Service unavailable"
-    last_err: str | None = None
-    for attempt in range(1, 4):
-        try:
-            async with httpx.AsyncClient(timeout=240.0) as client:
-                r = await client.post(url, headers=headers, json=payload)
-
-                if r.status_code in (429, 503):
-                    last_err = r.text[:800] if r.text else ""
-                    await asyncio.sleep(1.5 * attempt)
-                    continue
-
-                if r.status_code >= 400:
-                    raise RuntimeError(f"Together Images HTTP {r.status_code}: {r.text[:800]}")
-
-                data = r.json()
-                item = (data.get("data") or [{}])[0]
-
-                b64 = item.get("b64_json")
-                if b64:
-                    return base64.b64decode(b64)
-
-                url_out = item.get("url")
-                if url_out:
-                    img_r = await client.get(url_out)
-                    if img_r.status_code >= 400:
-                        raise RuntimeError(
-                            f"Failed to download image URL {url_out}: HTTP {img_r.status_code}: {(img_r.text or '')[:200]}"
-                        )
-                    return img_r.content
-
-                raise RuntimeError(f"No b64_json or url in Together response: {json.dumps(data)[:900]}")
-        except Exception as e:
-            last_err = f"{type(e).__name__}: {repr(e)}"
-            await asyncio.sleep(0.7 * attempt)
-
-
-    raise RuntimeError(f"Together image generation failed after retries. Last error: {last_err}")
-
-
-async def openrouter_generate_image(prompt: str, image_model: str) -> bytes:
-    headers = {
-        "Authorization": f"Bearer {OPENROUTER_API_KEY}",
-        "Content-Type": "application/json",
-        "HTTP-Referer": OPENROUTER_SITE_URL,
-        "X-Title": OPENROUTER_APP_NAME,
-    }
-
-    payload = {
-        "model": image_model,
-        "messages": [{"role": "user", "content": prompt}],
-        "modalities": ["image", "text"],
-        "stream": False,
-    }
-
-    async with httpx.AsyncClient(timeout=120.0) as client:
-        r = await client.post(OPENROUTER_URL, headers=headers, json=payload)
-
-    if r.status_code >= 400:
-        body_preview = (r.text or "")[:400]
-        raise RuntimeError(f"OpenRouter Images HTTP {r.status_code}: {body_preview}")
-
-    data = r.json()
-
-    # В OpenRouter картинка приходит в message.images[0].image_url.url как data URL
-    try:
-        msg = data["choices"][0]["message"]
-        images = msg.get("images") or []
-        if not images:
-            raise KeyError("message.images empty")
-        data_url = images[0]["image_url"]["url"]
-    except Exception:
-        # для отладки полезно увидеть кусок ответа
-        preview = json.dumps(data, ensure_ascii=False)[:600]
-        raise RuntimeError(f"No images in OpenRouter response: {preview}")
-
-    return _data_url_to_bytes(data_url)
-
 # ----------------------------
 # OpenRouter call (async)
 # ----------------------------
@@ -1472,23 +1122,6 @@ IMAGE_FUN_EMOJIS = [
     "🎲", "🧩", "⚙️", "🔮", "🫧", "✨", "🧪", "📐", "📊",
     "🧠", "🎛️", "🪄", "🌀", "🧿", "🎯", "📎", "🔧",
 ]
-# --- strip SCENE_CONTRACT blocks from visible output ---
-_SCENE_CONTRACT_RE = re.compile(
-    r"\[\[?SCENE_CONTRACT\]\]?\s*\n?\s*\{.*?\}",
-    re.DOTALL
-)
-
-def strip_scene_contract(text: str) -> str:
-    """
-    Убирает служебный блок SCENE_CONTRACT, если модель его напечатала в ответ.
-    Поддерживает варианты [SCENE_CONTRACT] и [[SCENE_CONTRACT]].
-    """
-    if not text:
-        return text
-    cleaned = _SCENE_CONTRACT_RE.sub("", text)
-    return cleaned.strip()
-
-
 # ----------------------------
 # STATUS RENDER MODE
 # ----------------------------
@@ -2321,8 +1954,8 @@ async def on_text(message: types.Message):
             mode=mode,
             message_id=int(message.message_id),
             text_len=len(user_text),
-            photo_provider=(IMAGE_BACKEND_PROVIDER or ""),
-            photo_model=(OPENROUTER_IMAGE_MODEL if (IMAGE_BACKEND_PROVIDER or "").strip().lower() == "openrouter" else (OPENAI_IMAGE_MODEL if (IMAGE_BACKEND_PROVIDER or "").strip().lower() == "openai" else "")),
+            photo_provider=_image_analytics_context()[0],
+            photo_model=_image_analytics_context()[1],
             ok=1,
         )
 
@@ -2351,15 +1984,15 @@ async def on_text(message: types.Message):
                 mode=mode,
                 message_id=int(message.message_id),
                 text_len=len(user_text),
-                photo_provider=(IMAGE_BACKEND_PROVIDER or ""),
-                photo_model=(OPENROUTER_IMAGE_MODEL if (IMAGE_BACKEND_PROVIDER or "").strip().lower() == "openrouter" else (OPENAI_IMAGE_MODEL if (IMAGE_BACKEND_PROVIDER or "").strip().lower() == "openai" else "")),
+                photo_provider=_image_analytics_context()[0],
+                photo_model=_image_analytics_context()[1],
                 ok=0,
                 note="cancelled",
             )
 
             return
         except Exception as e:
-            logging.exception("Image generation failed (provider=%s user_id=%s): %s", IMAGE_BACKEND_PROVIDER, user_id, e)
+            logging.exception("Image generation failed (provider=%s user_id=%s): %s", _image_analytics_context()[0], user_id, e)
             cancel_event.set()
             try:
                 status_task.cancel()
@@ -2378,8 +2011,8 @@ async def on_text(message: types.Message):
                 mode=mode,
                 message_id=int(message.message_id),
                 text_len=len(user_text),
-                photo_provider=(IMAGE_BACKEND_PROVIDER or ""),
-                photo_model=(OPENROUTER_IMAGE_MODEL if (IMAGE_BACKEND_PROVIDER or "").strip().lower() == "openrouter" else (OPENAI_IMAGE_MODEL if (IMAGE_BACKEND_PROVIDER or "").strip().lower() == "openai" else "")),
+                photo_provider=_image_analytics_context()[0],
+                photo_model=_image_analytics_context()[1],
                 ok=0,
                 note=f"error: {type(e).__name__}",
             )
@@ -2409,8 +2042,8 @@ async def on_text(message: types.Message):
             mode=mode,
             message_id=int(message.message_id),
             text_len=len(user_text),
-            photo_provider=(IMAGE_BACKEND_PROVIDER or ""),
-            photo_model=(OPENROUTER_IMAGE_MODEL if (IMAGE_BACKEND_PROVIDER or "").strip().lower() == "openrouter" else (OPENAI_IMAGE_MODEL if (IMAGE_BACKEND_PROVIDER or "").strip().lower() == "openai" else "")),
+            photo_provider=_image_analytics_context()[0],
+            photo_model=_image_analytics_context()[1],
             ok=1,
             note="success",
         )

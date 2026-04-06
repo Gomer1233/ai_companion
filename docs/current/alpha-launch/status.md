@@ -28,10 +28,13 @@
 - `src/main.py` history, photo gate, mode state, and mode lock wrappers now route through `SQLiteRepositories` instead of ad hoc launcher SQL
 - mode switch and reset flows in `src/main.py` now use repository-backed conversation reset/active-mode paths, with legacy relationship cleanup left as an explicit hook
 - remaining launcher profile/settings/chat-lock helpers in `src/main.py` now route through `SQLiteRepositories`; direct SQLite usage is down to bootstrap/event logging paths
+- runtime event logging in `src/main.py` now routes through `SQLiteRepositories` instead of ad hoc launcher SQL
+- image provider selection, prompt translation, and backend generation now live in `src/core/image_service.py` instead of `src/main.py`
+- `init_db()` now runs the shared SQLite migration path before legacy bootstrap helpers, so repository-backed conversation tables exist during launcher startup
 
 ## Next Step
 
-Continue `ALPHA-001 Finish Refactor + Boundaries` by extracting more launcher orchestration out of `src/main.py` and deciding whether bootstrap/event logging DB access stays local or also moves behind adapters.
+Continue `ALPHA-001 Finish Refactor + Boundaries` by extracting Telegram-side image status/message orchestration and remaining chat/conversation flow out of `src/main.py`, while keeping bootstrap-only DB setup isolated.
 
 ## Risks / Notes
 
