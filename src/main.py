@@ -22,9 +22,6 @@ from src.config.modes import (
     MODE_TO_IMAGE_STYLE,
     MODE_TO_SHORT_DESC,
     MODE_TO_MODEL,
-    MODE_TO_TEMPERATURE,
-    MODE_TO_MAX_TOKENS,
-    MODE_TO_FREQUENCY_PENALTY,
     MODE_CATALOG,
     MODE_TO_PREMISE,
 )
@@ -42,7 +39,6 @@ from src.adapters.telegram.image_runtime import (
     handle_image_cancel_callback,
 )
 
-from src.prompts.oldschool_rep import RAP_SUBMODE_PROMPTS, RAP_SUBMODE_DEFAULT_BPM
 from src.prompts.relationship import (
     ensure_relationship_table,
     get_relationship_state,
@@ -57,13 +53,18 @@ from src.app.settings import Settings
 from src.core.runtime_helpers import (
     call_openrouter_with_meta as shared_call_openrouter_with_meta,
     chunk_text,
-    estimate_tokens,
     extract_json_object,
-    fix_truncated_reply,
-    is_truncated_for_glue,
     keep_typing,
     strip_internal_thoughts,
     strip_scene_contract,
+)
+from src.core.chat_service import (
+    build_chat_messages,
+    build_system_prompt as build_chat_system_prompt,
+    generate_chat_completion,
+    is_audio_request as is_audio_request_for_chat,
+    strip_game_over_markers as strip_chat_game_over_markers,
+    update_story_state,
 )
 from src.core.image_service import ImageService
 from src.db.migrations import migrate_database
@@ -713,28 +714,6 @@ def get_user_profile(user_id: int) -> Dict[str, str]:
 GAME_OVER_MARKER = "[[GAME_OVER]]"
 
 # ловим и кривые варианты: [GAME_OVER]], [[GAME OVER]], [GAMT_OVER], и т.п.
-_GAME_OVER_RE = re.compile(
-    r"""
-    \[\[?\s*            # [ или [[
-    GA?M[E]?\s*         # GAME / GAM / опечатки
-    [_\s-]*             # _, пробел, -
-    OVE?R\s*            # OVER / OVR / опечатки
-    \]?\]               # ] или ]]
-    """,
-    re.IGNORECASE | re.VERBOSE
-)
-
-def strip_game_over_markers(text: str) -> tuple[str, bool]:
-    """
-    Возвращает (clean_text, triggered)
-    triggered=True если нашли хотя бы один маркер (даже кривой)
-    """
-    if not text:
-        return text, False
-    cleaned, n = _GAME_OVER_RE.subn("", text)
-    return cleaned.strip(), (n > 0)
-
-
 def lock_chat(user_id: int, reason: str = "") -> None:
     user_ref = legacy_user_ref(user_id)
     DB_REPOSITORIES.lock_chat(user_ref, reason)
@@ -875,38 +854,6 @@ def remind_context_kb() -> InlineKeyboardMarkup:
     )
 
 
-def format_state_block(state: Dict[str, Any]) -> str:
-    cast = state.get("cast") or []
-    timeline = state.get("timeline") or []
-    threads = state.get("open_threads") or []
-
-    cast_lines = []
-    for p in cast[:8]:
-        name = (p.get("name") or "").strip()
-        role = (p.get("role") or "").strip()
-        notes = (p.get("notes") or "").strip()
-        if not name:
-            continue
-        line = f"- {name} ({role})" if role else f"- {name}"
-        if notes:
-            line += f": {notes}"
-        cast_lines.append(line)
-
-    tl_lines = [f"- {x}" for x in timeline[-8:]]
-    th_lines = [f"- {x}" for x in threads[:8]]
-
-    return (
-        "\n\n[Состояние сюжета]\n"
-        f"Сезон: {state.get('season', 1)} | Эпизод: {state.get('episode', 1)}\n"
-        f"Локация: {state.get('location', '')}\n"
-        f"Завязка: {state.get('premise', '')}\n"
-        "Персонажи:\n" + ("\n".join(cast_lines) if cast_lines else "- (пока нет)") + "\n"
-        "Хронология (последнее):\n" + ("\n".join(tl_lines) if tl_lines else "- (пока нет)") + "\n"
-        "Открытые нити:\n" + ("\n".join(th_lines) if th_lines else "- (пока нет)") + "\n"
-        f"Кратко сейчас: {state.get('recap','')}\n"
-    )
-
-
 def get_mode_state(user_id: int, mode: str) -> Dict[str, Any]:
     user_ref, conversation_ref = _repo_refs(user_id)
     state = DB_REPOSITORIES.load_mode_state(user_ref, conversation_ref, mode)
@@ -920,31 +867,6 @@ def get_mode_state(user_id: int, mode: str) -> Dict[str, Any]:
 def save_mode_state(user_id: int, mode: str, state: Dict[str, Any]) -> None:
     user_ref, conversation_ref = _repo_refs(user_id)
     DB_REPOSITORIES.save_mode_state(user_ref, conversation_ref, mode, state)
-
-AUDIO_SYSTEM_PROMPT = """
-Ты говоришь голосом.
-Отвечай кратко: 2–4 предложения.
-Без списков.
-Без длинных объяснений.
-Разговорный стиль, как живой человек.
-Паузы и эмоции допустимы, но без воды.
-Говори так, будто записываешь короткое голосовое сообщение в мессенджере.
-"""
-
-def is_audio_request(text: str) -> bool:
-    t = (text or "").lower()
-    triggers = [
-        "запиши аудио",
-        "запиши мне аудио",
-        "голосом",
-        "озвучь",
-        "сделай аудиосообщение",
-        "сделай голосовое",
-        "голосовое сообщение",
-        "аудио-сообщение",
-        "аудиосообщение",
-    ]
-    return any(x in t for x in triggers)
 
 # ----------------------------
 # OpenAI TTS (async)
@@ -1059,17 +981,6 @@ async def call_openrouter_with_meta(
         frequency_penalty=frequency_penalty,
         timeout_s=timeout_s,
     )
-
-
-MAX_AUTO_CONTINUATIONS = int(os.getenv("MAX_AUTO_CONTINUATIONS", "2"))
-
-_CONTINUE_PROMPT = (
-    "Продолжи предыдущий ответ ровно с места обрыва. "
-    "Не повторяй уже сказанное. "
-    "НЕ извиняйся и НЕ упоминай, что ответ был прерван. "
-    "Просто продолжай по делу и закончи логично."
-)
-
 
 # ----------------------------
 # Telegram bot
@@ -1746,7 +1657,7 @@ async def on_text(message: types.Message):
     # --- /IMAGE GENERATION FLOW ---
 
 
-    audio_only = is_audio_request(user_text)
+    audio_only = is_audio_request_for_chat(user_text)
    
     profile = get_user_profile(user_id)
     mode = (profile.get("mode") or "basic").strip()
@@ -1770,8 +1681,6 @@ async def on_text(message: types.Message):
     append_history(user_id, mode, "user", user_text_for_history)
     history = get_history(user_id, mode)
 
-    memory_block = format_state_block(state)
-    
     if mode == "whore":
         rel_state = get_relationship_state(DB_PATH, user_id, mode)
         ghost_mood = check_ghosting(rel_state)
@@ -1787,95 +1696,13 @@ async def on_text(message: types.Message):
         if system_base is None:
             system_base = MODE_TO_SYSTEM_PROMPT["basic"]
 
-    base = AUDIO_SYSTEM_PROMPT if (audio_only and mode != "whore") else system_base
-
-    chef_addon = ""
-    if mode == "chef":
-        sub = (state.get("chef_submode") or "").strip()
-
-        if sub == "restaurant":
-            chef_addon = (
-                "\n\n[CHEF_SUBMODE=RESTAURANT]\n"
-                "РАБОТАЙ СТРОГО В ДВЕ ФАЗЫ.\n"
-                "КЛЮЧЕВОЕ ПРАВИЛО: СНАЧАЛА КОЛИЧЕСТВА, ПОТОМ ТЕХНИКА.\n\n"
-
-                "ФАЗА 1 — ПРОЕКТИРОВАНИЕ:\n"
-                "- Уточни количество порций.\n"
-                "- Уточни или предложи ТОЧНЫЕ КОЛИЧЕСТВА основных ингредиентов.\n"
-                "- ЯВНО пропиши объёмы: граммы, миллилитры, штуки.\n"
-                "- Перечисли дополнительные ингредиенты и специи С КОЛИЧЕСТВАМИ.\n"
-                "- НЕ ДАВАЙ рецепт, шаги или технику.\n"
-                "- Заверши вопросом подтверждения состава и количеств.\n\n"
-
-                "ФАЗА 2 — ИСПОЛНЕНИЕ (ПОСЛЕ ПОДТВЕРЖДЕНИЯ):\n"
-                "- Дай полный рецепт с объяснением техники.\n"
-                "- Все ингредиенты — с точными количествами.\n"
-                "- Укажи контроль готовности и подачу.\n\n"
-
-                "СТРОГО ЗАПРЕЩЕНО:\n"
-                "- Начинать готовку без фиксации количеств.\n"
-                "- Описывать блюдо без указания граммовок.\n"
-            )
-
-
-        else:
-            # default = home_fast
-            chef_addon = (
-                "\n\n[CHEF_SUBMODE=HOME_FAST]\n"
-                "РАБОТАЙ В ДВЕ ФАЗЫ.\n"
-                "КЛЮЧЕВОЕ ПРАВИЛО: СНАЧАЛА КОЛИЧЕСТВА, ПОТОМ РЕЦЕПТ.\n\n"
-
-                "ФАЗА 1 — БЫСТРОЕ ПРОЕКТИРОВАНИЕ:\n"
-                "- Уточни, НА СКОЛЬКО ПОРЦИЙ готовим.\n"
-                "- Уточни или предложи КОЛИЧЕСТВА основных ингредиентов (в граммах/штуках).\n"
-                "- Если пользователь не указал объёмы — предложи стандартные (например: 2 грудки = ~300 г).\n"
-                "- Чётко перечисли, что ЕЩЁ понадобится и в каком количестве.\n"
-                "- НЕ ДАВАЙ шаги готовки.\n"
-                "- Заверши вопросом подтверждения количеств.\n\n"
-
-                "ФАЗА 2 — БЫСТРОЕ ИСПОЛНЕНИЕ (ПОСЛЕ ПОДТВЕРЖДЕНИЯ):\n"
-                "- Дай короткий рецепт.\n"
-                "- Формат:\n"
-                "  • Ингредиенты с точными количествами\n"
-                "  • Шаги (до 6, по 1 строке)\n"
-                "  • Готово, когда (1 строка)\n\n"
-
-                "ЗАПРЕЩЕНО:\n"
-                "- Давать рецепт без указания количеств.\n"
-                "- Использовать формулировки «по вкусу» для базовых ингредиентов.\n"
-            )
-    style_addon = ""
-
-    rap_addon = ""
-    if mode == "oldschool_rep":
-        sub = (state.get("rap_submode") or "story").strip().lower()
-        if sub not in ("street", "story", "lyrical"):
-            sub = "story"
-
-        # Берём полноценный промпт подрежима из oldschool_rep.py
-        from src.prompts.oldschool_rep import RAP_SUBMODE_PROMPTS, RAP_SUBMODE_DEFAULT_BPM
-        
-        submode_prompt = RAP_SUBMODE_PROMPTS.get(sub, RAP_SUBMODE_PROMPTS["story"])
-        default_bpm = RAP_SUBMODE_DEFAULT_BPM.get(sub, 88)
-
-        rap_addon = f'''
-
-        {submode_prompt}
-
-        BPM по умолчанию: {default_bpm}
-        Если пользователь указал BPM явно — используй его.
-
-        ВАЖНО:
-        - Если пользователь указал "2 куплета" / "два куплета" — СРАЗУ пиши 2 куплета (без доп. вопросов).
-        - Не задавай уточняющих вопросов о формате, если формат уже выбран.
-        - Выводи только текст трека (без объяснений).
-
-        '''
-
-    style_addon = ""
-
-    system_prompt = base + memory_block + chef_addon + rap_addon + style_addon
-    messages = [{"role": "system", "content": system_prompt}] + history
+    system_prompt = build_chat_system_prompt(
+        mode=mode,
+        state=state,
+        base_prompt=system_base,
+        audio_only=audio_only,
+    )
+    messages = build_chat_messages(system_prompt=system_prompt, history=history)
 
 
     
@@ -1883,132 +1710,32 @@ async def on_text(message: types.Message):
     typing_task = asyncio.create_task(keep_typing(bot, message.chat.id, stop_event))
 
     try:
-        temperature = MODE_TO_TEMPERATURE.get(mode)
-
-        if temperature is None:
-            temperature = MODE_TO_TEMPERATURE["basic"]
-
-        temperature = float(temperature)
-
-        max_tokens = int(MODE_TO_MAX_TOKENS.get(mode, MODE_TO_MAX_TOKENS.get("basic", 600)))
-        freq_pen = float(MODE_TO_FREQUENCY_PENALTY.get(mode, MODE_TO_FREQUENCY_PENALTY.get("basic", 0.2)))
-        
-        # Переопределяем параметры только для unhinged-режима
-        if mode == "unhinged":
-            temperature = 1.3          # очень высокая — для дикого, непредсказуемого креатива
-            max_tokens = 1000           # чтобы хватило на длинные безумные истории
-            freq_pen = 0.0              # без наказания за повторы — даёт "маньячный" поток сознания
-        # аудио: короче и стабильнее (как у тебя было), но через конфиги
-        if audio_only and mode != "whore":
-            max_tokens = 120
-            temperature = min(temperature, 0.6)
-            freq_pen = max(freq_pen, 0.2)
-
-        # --- usage accumulator (tokens cost) ---
-        prompt_tokens_sum = 0
-        completion_tokens_sum = 0
-        total_tokens_sum = 0
-        tokens_source = ""
-
-        # 1) первый проход
-        reply_raw, finish_reason, usage = await call_openrouter_with_meta(
+        completion = await generate_chat_completion(
+            mode=mode,
             model=model,
             messages=messages,
-            temperature=temperature,
-            max_tokens=max_tokens,
-            frequency_penalty=freq_pen,
-            timeout_s=90.0,
+            call_openrouter_with_meta=call_openrouter_with_meta,
         )
-
-        # accumulate usage from API (if present)
-        pt = int((usage or {}).get("prompt_tokens") or 0)
-        ct = int((usage or {}).get("completion_tokens") or 0)
-        tt = int((usage or {}).get("total_tokens") or 0)
-        prompt_tokens_sum += pt
-        completion_tokens_sum += ct
-        total_tokens_sum += tt
-        if tt > 0:
-            tokens_source = "api"
-
-
-        reply_raw = strip_internal_thoughts(reply_raw)
-        reply_raw = strip_scene_contract(reply_raw)
-
-
-        # 2) если похоже на обрыв — добираем продолжение "под капотом"
-        glued = reply_raw
-        cont_round = 0
-
-        while cont_round < MAX_AUTO_CONTINUATIONS and is_truncated_for_glue(glued, finish_reason):
-            cont_round += 1
-
-            cont_messages = (
-                messages
-                + [{"role": "assistant", "content": glued}]
-                + [{"role": "user", "content": _CONTINUE_PROMPT}]
-            )
-
-            cont_text, cont_finish, cont_usage = await call_openrouter_with_meta(
-                model=model,
-                messages=cont_messages,
-                temperature=temperature,
-                max_tokens=max(220, int(max_tokens * 0.7)),
-                frequency_penalty=freq_pen,
-                timeout_s=90.0,
-            )
-
-            # accumulate usage from API (if present)
-            pt = int((cont_usage or {}).get("prompt_tokens") or 0)
-            ct = int((cont_usage or {}).get("completion_tokens") or 0)
-            tt = int((cont_usage or {}).get("total_tokens") or 0)
-            prompt_tokens_sum += pt
-            completion_tokens_sum += ct
-            total_tokens_sum += tt
-            if tt > 0:
-                tokens_source = "api"
-
-
-            cont_text = strip_internal_thoughts(cont_text)
-            cont_text = strip_scene_contract(cont_text)
-
-            # если продолжение пустое — прекращаем
-            if not (cont_text or "").strip():
-                finish_reason = cont_finish
-                break
-
-            # склеиваем аккуратно (без дублей: добавим перевод строки)
-            glued = (glued.rstrip() + "\n" + cont_text.lstrip()).strip()
-            finish_reason = cont_finish
-
-        # 3) финальная пост-обработка только ПОСЛЕ склейки
-        reply = fix_truncated_reply(glued)
-        reply = strip_internal_thoughts(reply)
-        reply = strip_scene_contract(reply)
-        reply = fix_truncated_reply(reply)
+        reply = completion.reply
 
         # --- FINAL GUARD: prevent silent "empty reply" ---
         if not (reply or "").strip():
             logging.warning(
-                "EMPTY FINAL REPLY: raw_len=%s glued_len=%s finish_reason=%r",
-                len((reply_raw or "")),
-                len((glued or "")),
-                finish_reason,
+                "EMPTY FINAL REPLY: mode=%s model=%s",
+                mode,
+                model,
             )
             # fallback: try to show something useful instead of silence
-            fallback = (reply_raw or "").strip() or "Пустой ответ от модели. Переформулируй запрос одной фразой."
+            fallback = "Пустой ответ от модели. Переформулируй запрос одной фразой."
             await message.answer(fallback)
             stop_event.set()
             await typing_task
             return
 
-
-        # If API didn't return usage, estimate tokens as fallback
-        if total_tokens_sum <= 0:
-            # для денег тебе важнее output, но можно и input оценить отдельно
-            completion_tokens_sum = estimate_tokens(reply, model=model)
-            prompt_tokens_sum = 0
-            total_tokens_sum = completion_tokens_sum
-            tokens_source = "tiktoken" if completion_tokens_sum > 0 else ""
+        prompt_tokens_sum = completion.prompt_tokens
+        completion_tokens_sum = completion.completion_tokens
+        total_tokens_sum = completion.total_tokens
+        tokens_source = completion.tokens_source
 
 
     except Exception as e:
@@ -2061,7 +1788,7 @@ async def on_text(message: types.Message):
     )
 
     # --- GAME OVER lock ---
-    clean, triggered = strip_game_over_markers(reply)
+    clean, triggered = strip_chat_game_over_markers(reply)
 
     if triggered:
         lock_mode(user_id, mode, reason="GAME OVER")  # внутренний флаг, не показываем юзеру
@@ -2089,24 +1816,7 @@ async def on_text(message: types.Message):
 
     # --- обновляем сюжетную память (MVP-обновление без второго вызова) ---
     try:
-        # эпизод растёт каждый ход
-        state["episode"] = int(state.get("episode", 1)) + 1
-
-        # простой recap: 1-2 предложения из ответа (обрежем по длине)
-        recap = reply.strip().replace("\n", " ")
-        if len(recap) > 240:
-            recap = recap[:240].rsplit(" ", 1)[0] + "…"
-        state["recap"] = recap
-
-        # timeline: добавим короткий пункт по ходу пользователя
-        tl = state.get("timeline") or []
-        user_line = user_text.strip().replace("\n", " ")
-        if len(user_line) > 140:
-            user_line = user_line[:140].rsplit(" ", 1)[0] + "…"
-        tl.append(f"Ход: {user_line}")
-        # ограничим размер
-        state["timeline"] = tl[-40:]
-
+        state = update_story_state(state=state, user_text=user_text, reply=reply)
         save_mode_state(user_id, mode, state)
     except Exception:
         logging.exception("Failed to update mode_state (user_id=%s mode=%s)", user_id, mode)
