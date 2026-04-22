@@ -17,7 +17,7 @@
 
 - `multichannel-core` remains the completed foundation initiative and should not be overwritten to carry alpha launch planning.
 - Alpha launch planning now lives under `docs/current/alpha-launch/`.
-- `src/main.py` still needs service extraction and launcher thinning before HTTP, Postgres, and Mini App work should proceed.
+- `src/main.py` still needs service extraction and launcher thinning before HTTP, Postgres, Mini App, and any future standalone web client work should proceed cleanly.
 
 ## Completed
 
@@ -41,4 +41,5 @@ Continue `ALPHA-001 Finish Refactor + Boundaries` by extracting Telegram-side im
 - The alpha release path depends on finishing launcher cleanup before introducing a second transport surface.
 - Explicit launch scope is intentionally conservative on capability surface, but persona scope remains subject to audit freeze.
 - Security baseline assumes no direct browser path to Supabase in alpha v1.
+- Backend boundaries should avoid Telegram-only assumptions because a future standalone web client is expected after alpha.
 

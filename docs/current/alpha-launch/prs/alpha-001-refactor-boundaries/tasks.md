@@ -9,6 +9,8 @@
 - [ ] Decide whether `init_db()` bootstrap stays in launcher or moves behind bootstrap/adapters.
 - [ ] Remove or neutralize `src/core/legacy_runtime.py`.
 - [ ] Keep Telegram adapter code free of product rules.
+- [ ] Keep core/service boundaries free of `aiogram` types.
+- [ ] Ensure conversation/image/reset/access flows operate on domain inputs, not Telegram message objects.
 - [ ] Add or update service-level tests for extracted logic.
 - [x] Run `pytest` on the touched refactor slices.
 - [ ] Run `ruff`.

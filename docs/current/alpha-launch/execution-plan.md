@@ -15,7 +15,9 @@
 ## Fixed Decisions
 
 - Один backend truth, один Telegram bot launcher, один access-policy слой.
+- Telegram bot, Mini App и будущий standalone web client рассматриваются как разные клиенты одного backend truth.
 - Бот остаётся `bot-first`; Mini App не забирает основной чат в alpha v1.
+- Telegram является первым клиентом alpha, но не считается долгосрочно единственным клиентом системы.
 - Railway хостит Python backend service: bot runtime + HTTP API.
 - Vercel хостит только Mini App frontend.
 - Mini App ходит напрямую: `browser -> Railway API`.
@@ -58,6 +60,7 @@
 ### Сделать
 
 - Вынести `chat/image/reset/conversation/access/job` orchestration из `src/main.py` в сервисы.
+- Закрепить transport-neutral service boundaries: core/services не принимают `aiogram` types и не зависят от Telegram transport.
 - Удалить или полностью обнулить `src/core/legacy_runtime.py`.
 - Убрать из launcher прямые `sqlite3.connect`, schema helpers и provider branching.
 - Закрепить `AccessPolicyService` как единственное место для:
@@ -102,6 +105,7 @@ Source of truth для `GET /api/*` живёт только в Python backend se
   - `GET /readyz`
 - Не добавлять entitlement/business logic в Vercel.
 - Vercel отдаёт только Mini App frontend assets.
+- Проектировать HTTP API как reusable backend surface не только для Mini App, но и для будущего standalone web client.
 
 ### Session Contract
 
@@ -161,6 +165,7 @@ Source of truth для `GET /api/*` живёт только в Python backend se
 - Mini App browser ходит напрямую в Railway API.
 - Python backend остаётся единственным owner `GET /api/*`.
 - Init-data verification и session issuance не живут во frontend.
+- HTTP adapter остаётся channel-neutral: conversation/job/access/media endpoints должны быть пригодны и для будущего web client.
 
 ## 3. Replace SQLite with Supabase Postgres
 
@@ -493,6 +498,7 @@ Compliance начинается во время Track 4-8, а этот шаг я
 - `src/adapters/http/**` — фиксированный путь для Python HTTP adapter.
 - FastAPI — фиксированный HTTP stack.
 - Mini App transport path фиксирован: `browser -> Railway API` directly.
+- Текущий HTTP/API слой проектируется как reusable backend surface beyond Telegram, чтобы future standalone web client не требовал второго большого refactor.
 - Session token = opaque session id with server-side lookup, передаётся как bearer token, TTL 15 minutes, без refresh endpoint.
 - Mini App при `401` повторно проходит `POST /api/session/telegram`.
 - Postgres backend — единственный source of truth для bot и Mini App.
@@ -501,3 +507,7 @@ Compliance начинается во время Track 4-8, а этот шаг я
 - Текущие persona из `modes.py` считаются candidate set; финальный alpha catalog определяется audit freeze.
 - `RLS` в alpha — defense-in-depth, а не primary auth boundary.
 - Compliance работа начинается вместе с Provider/Monetization tracks, а не только в финале.
+
+## Post-Alpha Follow-On
+
+- standalone web client over the same Railway backend API.

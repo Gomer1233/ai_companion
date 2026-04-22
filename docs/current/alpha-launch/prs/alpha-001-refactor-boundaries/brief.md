@@ -4,6 +4,8 @@
 
 Finish the remaining launcher consolidation so `src/main.py` becomes a thin Telegram launcher over extracted services and no longer owns business logic or ad hoc persistence wiring.
 
+The extracted service boundaries must stay transport-neutral so the same core can later serve Telegram bot, Mini App, and a future standalone web client without another deep refactor.
+
 ## Current Decomposition Target
 
 `src/main.py` is being split into these responsibility buckets:
@@ -42,6 +44,7 @@ Still remaining:
 ## In Scope
 
 - extract remaining chat/image/reset/conversation/access/job orchestration from `src/main.py`
+- keep extracted service APIs transport-neutral and reusable beyond Telegram
 - remove or neutralize `src/core/legacy_runtime.py`
 - remove direct `sqlite3.connect` calls and schema helpers from the launcher
 - keep product rules out of Telegram adapter code
