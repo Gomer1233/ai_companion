@@ -35,6 +35,12 @@ from aiogram.types import InlineKeyboardMarkup, InlineKeyboardButton
 from aiogram.types import ReplyKeyboardMarkup, KeyboardButton
 from aiogram.types import BufferedInputFile
 from aiogram.types.input_file import FSInputFile
+from src.adapters.telegram.image_runtime import (
+    ImageJobRegistry,
+    ImageRuntimeHooks,
+    handle_awaiting_image_prompt,
+    handle_image_cancel_callback,
+)
 
 from src.prompts.oldschool_rep import RAP_SUBMODE_PROMPTS, RAP_SUBMODE_DEFAULT_BPM
 from src.prompts.relationship import (
@@ -1075,185 +1081,7 @@ dp = Dispatcher()
 # IMAGE GENERATION: live status + cancel
 # ----------------------------
 
-IMAGE_STATUS_INTERVAL_SEC = 3.0  # как часто менять фразу/прогресс
-IMAGE_VANISH_SEC = 0.6           # "испарение" (короткая пауза между фразами)
-PROGRESS_BAR_LEN = 14
-
-# Храним активные генерации по user_id
-IMAGE_JOBS: Dict[int, Dict[str, Any]] = {}
-
-IMAGE_FUN_PHRASES = [
-    "Запускаю сигнатуры…",
-    "Тестирую на котиках…",
-    "Сверяюсь с реестром ламантинов…",
-    "Разогреваю нейроны до рабочей температуры…",
-    "Проверяю, не подменили ли пиксели на поддельные…",
-    "Собираю пиксели в правильном порядке…",
-    "Уговариваю алгоритм быть красивым…",
-    "Протираю объектив матрицы…",
-    "Вызываю духов композиции и света…",
-    "Настраиваю баланс магии и здравого смысла…",
-    "Делаю вид, что понимаю современное искусство…",
-    "Согласовываю результат с кото-комиссией…",
-
-    "Калибрую тени и полутона…",
-    "Выравниваю реальность с ожиданиями…",
-    "Проверяю, не поплыл ли горизонт…",
-    "Подкручиваю эстетические коэффициенты…",
-    "Оптимизирую количество красоты на пиксель…",
-    "Проверяю симметрию вселенной…",
-    "Соблюдаю технику художественной безопасности…",
-    "Пересчитываю пропорции на салфетке…",
-    "Подгоняю результат под законы жанра…",
-    "Слежу, чтобы лишние конечности не появились…",
-    "Фиксирую композицию до стабильно красивой…",
-    "Снижаю энтропию изображения…",
-
-    "Проверяю, не убежал ли стиль…",
-    "Уточняю художественное намерение…",
-    "Формирую финальный визуальный замысел…",
-    "Сверяю результат с внутренним вкусом…",
-    "Навожу последний визуальный лоск…",
-    "Собираю финальный образ…",
-    "Проверяю картинку на соответствие реальности…",
-]
-
-IMAGE_FUN_EMOJIS = [
-    "🎲", "🧩", "⚙️", "🔮", "🫧", "✨", "🧪", "📐", "📊",
-    "🧠", "🎛️", "🪄", "🌀", "🧿", "🎯", "📎", "🔧",
-]
-# ----------------------------
-# STATUS RENDER MODE
-# ----------------------------
-
-def _progress_bar(tick: int, length: int = PROGRESS_BAR_LEN) -> str:
-    # "бегунок" туда-сюда (не знает реального прогресса, но выглядит живо)
-    if length < 6:
-        length = 6
-    span = length - 4
-    p = tick % (2 * span)
-    pos = p if p <= span else (2 * span - p)
-    left = "░" * pos
-    mid = "▓▓▓▓"
-    right = "░" * (span - pos)
-    return f"[{left}{mid}{right}]"
-
-def _spinner(tick: int) -> str:
-    frames = ["⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏"]
-    return frames[tick % len(frames)]
-
-def image_cancel_kb() -> InlineKeyboardMarkup:
-    return InlineKeyboardMarkup(
-        inline_keyboard=[[InlineKeyboardButton(text="⛔ Отмена", callback_data="imgcancel")]]
-    )
-FADE_FRAMES = [
-    "⋯⋯⋯⋯⋯",
-    "⋯⋯⋯⋯",
-    "⋯⋯⋯",
-    "⋯⋯",
-    "⋯",
-    "·",
-    "\u200b",  # zero-width space: выглядит как "пусто", но Telegram принимает
-]
-DUST_FADE_CHARS = ["·", "⋅", "•", "✧"]
-
-
-def make_dust_frame(count: int) -> str:
-    """
-    Возвращает строку с 'распадающимися' точками.
-    Пример: '·   · ·'
-    """
-    if count <= 0:
-        return "\u200b"  # визуально пусто, но Telegram принимает
-
-    parts = []
-    for _ in range(count):
-        parts.append(random.choice(DUST_FADE_CHARS))
-        # случайные промежутки — ключ к эффекту распада
-        parts.append(" " * random.randint(1, 3))
-
-    return "".join(parts).rstrip()
-
-
-async def fade_out_text(bot: Bot, chat_id: int, message_id: int) -> bool:
-    """
-    Имитирует 'распад' текста: точки рассыпаются и исчезают.
-    ВАЖНО: без reply_markup. Иначе будут жить кнопки/бардак.
-    """
-    start = random.randint(5, 7)
-
-    for n in range(start, -1, -1):
-        frame = make_dust_frame(n)
-        try:
-            await bot.edit_message_text(
-                chat_id=chat_id,
-                message_id=message_id,
-                text=frame,
-                reply_markup=None,   # <-- ключевое
-            )
-        except Exception as e:
-            if "message is not modified" in str(e).lower():
-                await asyncio.sleep(0.06)
-                continue
-            return False
-
-        await asyncio.sleep(0.10)
-
-    return True
-
-IMAGE_FUN_VISIBLE_SEC = 2.0  # сколько висит смешной пузырь до распыления
-
-def render_fun_phrase_only() -> str:
-    emoji = random.choice(IMAGE_FUN_EMOJIS)
-    if random.random() < 0.25:
-        emoji += random.choice(IMAGE_FUN_EMOJIS)
-    phrase = random.choice(IMAGE_FUN_PHRASES)
-    return f"{emoji} {phrase}"
-
-async def run_image_fun_only_loop(
-    bot: Bot,
-    chat_id: int,
-    cancel_event: asyncio.Event,
-) -> None:
-    """
-    СТРОГО:
-    1) отправили смешную фразу
-    2) подождали ~2 сек
-    3) распылили и удалили
-    4) следующая
-    Никаких прогрессбаров и отдельных "генерация..." сообщений.
-    """
-    try:
-        while not cancel_event.is_set():
-            # 1) пузырь со смешной фразой
-            try:
-                msg = await bot.send_message(chat_id, render_fun_phrase_only())
-            except Exception:
-                return
-
-            # 2) висит 2 сек
-            await asyncio.sleep(IMAGE_FUN_VISIBLE_SEC)
-            if cancel_event.is_set():
-                try:
-                    await bot.delete_message(chat_id, msg.message_id)
-                except Exception:
-                    pass
-                return
-
-            # 3) распыление + удаление
-            try:
-                await fade_out_text(bot, chat_id, msg.message_id)
-            except Exception:
-                pass
-            try:
-                await bot.delete_message(chat_id, msg.message_id)
-            except Exception:
-                pass
-
-            # 4) следующая — без доп. пауз (строго как ты просишь)
-
-    except asyncio.CancelledError:
-        return
+IMAGE_JOBS = ImageJobRegistry()
 
 
 def build_models_keyboard(models: List[str]) -> InlineKeyboardMarkup:
@@ -1839,7 +1667,7 @@ async def cmd_reset(message: types.Message):
     user_ref = legacy_user_ref(user_id)
     DB_REPOSITORIES.reset_user_all(user_ref)
     set_mode_picked(user_id, False)
-    IMAGE_JOBS.pop(user_id, None)
+    IMAGE_JOBS.clear(user_id)
 
     reset_relationship_state(DB_PATH, user_id, "whore")
 
@@ -1882,185 +1710,38 @@ async def on_text(message: types.Message):
 
     # --- CANCEL by text (без лишних пузырей) ---
     if user_text.lower() in ("отмена", "⛔ отмена", "/cancel"):
-        job = IMAGE_JOBS.get(user_id)
-        if job:
-            cancel_event: asyncio.Event = job["cancel_event"]
-            cancel_event.set()
-
-            gen_task: asyncio.Task | None = job.get("gen_task")
-            if gen_task and not gen_task.done():
-                gen_task.cancel()
-
-            # никаких сообщений от бота (чтобы не ломать правило "только смешные фразы")
+        if await IMAGE_JOBS.cancel(user_id):
             return
 
     # --- PATCH: awaiting_context должен обрабатываться ДО is_photo_request ---
     photo_gate = get_photo_gate(user_id)
 
     # --- HARD LOCK: если уже идёт генерация, новые сообщения НЕ запускают новые генерации ---
-    job = IMAGE_JOBS.get(user_id)
-    if job and isinstance(job, dict):
-        cancel_event = job.get("cancel_event")
-        if cancel_event and not cancel_event.is_set():
-            await message.answer("⏳ Генерация уже идёт. Дождись завершения или нажми «Отмена».")
-            return
+    if IMAGE_JOBS.is_active(user_id):
+        await message.answer("⏳ Генерация уже идёт. Дождись завершения или нажми «Отмена».")
+        return
 
 
     # --- IMAGE GENERATION FLOW (awaiting prompt) ---
-    if int(photo_gate.get("awaiting_image_prompt") or 0) == 1:
-        cd_until = int(photo_gate.get("image_cooldown_until_ts") or 0)
-        if cd_until > now:
-            left = cd_until - now
-            await message.answer(f"Кулдаун. Подожди ещё {left // 60 + 1} мин.")
-            return
-
-        # Сразу выходим из режима ожидания промпта, чтобы не запускать генерацию повторно
-        upsert_photo_gate(
-            user_id=user_id,
-            score=photo_gate["score"],
-            attempts=photo_gate["attempts"],
-            last_ask_ts=now,
-            cooldown_until_ts=photo_gate["cooldown_until_ts"],
-            awaiting_context=photo_gate["awaiting_context"],
-            context_asked_ts=photo_gate["context_asked_ts"],
-            awaiting_image_prompt=0,
-            image_cooldown_until_ts=photo_gate.get("image_cooldown_until_ts", 0),
-        )
-        photo_gate["awaiting_image_prompt"] = 0
-
-        # Регистрируем активную задачу (HARD LOCK выше начнёт игнорировать любые новые сообщения)
-        cancel_event = asyncio.Event()
-        IMAGE_JOBS[user_id] = {"cancel_event": cancel_event, "status_task": None, "gen_task": None}
-
-        # 1) Параллельно крутим ТОЛЬКО смешные фразы (каждая живёт 2 сек и распыляется)
-        status_task = asyncio.create_task(run_image_fun_only_loop(bot, message.chat.id, cancel_event))
-        IMAGE_JOBS[user_id]["status_task"] = status_task
-
-        # 2) Запускаем генерацию
-        profile = get_user_profile(user_id)
-        mode = (profile.get("mode") or "basic").strip()
-        style_hint = MODE_TO_IMAGE_STYLE.get(mode, MODE_TO_IMAGE_STYLE["basic"])
-
-        image_prompt = f"Стиль/арт-дирекшн: {style_hint}\nЗапрос пользователя: {user_text}"
-        
-        # --- LOG: photo_request (описание, которое пошло в генерацию) ---
-        log_user_event(
-            ts=now,
-            user_id=user_id,
-            chat_id=int(message.chat.id) if message.chat else 0,
-            username=(message.from_user.username or ""),
-            first_name=(message.from_user.first_name or ""),
-            event_type="photo_request",
-            mode=mode,
-            message_id=int(message.message_id),
-            text_len=len(user_text),
-            photo_provider=_image_analytics_context()[0],
-            photo_model=_image_analytics_context()[1],
-            ok=1,
-        )
-
-        gen_task = asyncio.create_task(generate_image_backend(image_prompt))
-        IMAGE_JOBS[user_id]["gen_task"] = gen_task
-
-        try:
-            img_bytes = await gen_task
-        except asyncio.CancelledError:
-            # Отмена — тихо останавливаем цикл фраз и выходим
-            cancel_event.set()
-            try:
-                status_task.cancel()
-            except Exception:
-                pass
-            IMAGE_JOBS.pop(user_id, None)
-            
-            # --- LOG: photo_result cancel ---
-            log_user_event(
-                ts=int(time.time()),
-                user_id=user_id,
-                chat_id=int(message.chat.id) if message.chat else 0,
-                username=(message.from_user.username or ""),
-                first_name=(message.from_user.first_name or ""),
-                event_type="photo_result",
-                mode=mode,
-                message_id=int(message.message_id),
-                text_len=len(user_text),
-                photo_provider=_image_analytics_context()[0],
-                photo_model=_image_analytics_context()[1],
-                ok=0,
-                note="cancelled",
-            )
-
-            return
-        except Exception as e:
-            logging.exception("Image generation failed (provider=%s user_id=%s): %s", _image_analytics_context()[0], user_id, e)
-            cancel_event.set()
-            try:
-                status_task.cancel()
-            except Exception:
-                pass
-            IMAGE_JOBS.pop(user_id, None)
-            
-            # --- LOG: photo_result error ---
-            log_user_event(
-                ts=int(time.time()),
-                user_id=user_id,
-                chat_id=int(message.chat.id) if message.chat else 0,
-                username=(message.from_user.username or ""),
-                first_name=(message.from_user.first_name or ""),
-                event_type="photo_result",
-                mode=mode,
-                message_id=int(message.message_id),
-                text_len=len(user_text),
-                photo_provider=_image_analytics_context()[0],
-                photo_model=_image_analytics_context()[1],
-                ok=0,
-                note=f"error: {type(e).__name__}",
-            )
-
-            await message.answer("Не получилось сгенерировать картинку. (см. лог ошибок)")
-            return
-
-        # Генерация закончилась — стопаем цикл фраз
-        cancel_event.set()
-        try:
-            status_task.cancel()
-        except Exception:
-            pass
-        IMAGE_JOBS.pop(user_id, None)
-
-        # Отдаём картинку пользователю
-        await message.answer_photo(BufferedInputFile(img_bytes, filename="image.png"))
-
-        # --- LOG: photo_result success ---
-        log_user_event(
-            ts=int(time.time()),
-            user_id=user_id,
-            chat_id=int(message.chat.id) if message.chat else 0,
-            username=(message.from_user.username or ""),
-            first_name=(message.from_user.first_name or ""),
-            event_type="photo_result",
-            mode=mode,
-            message_id=int(message.message_id),
-            text_len=len(user_text),
-            photo_provider=_image_analytics_context()[0],
-            photo_model=_image_analytics_context()[1],
-            ok=1,
-            note="success",
-        )
-
-
-        # Кулдаун на следующее фото
-        upsert_photo_gate(
-            user_id=user_id,
-            score=photo_gate["score"],
-            attempts=photo_gate["attempts"],
-            last_ask_ts=now,
-            cooldown_until_ts=photo_gate["cooldown_until_ts"],
-            awaiting_context=photo_gate["awaiting_context"],
-            context_asked_ts=photo_gate["context_asked_ts"],
-            awaiting_image_prompt=0,
-            image_cooldown_until_ts=now + IMAGE_COOLDOWN_SEC,
-        )
+    image_runtime_hooks = ImageRuntimeHooks(
+        get_user_profile=get_user_profile,
+        upsert_photo_gate=upsert_photo_gate,
+        log_user_event=log_user_event,
+        image_analytics_context=_image_analytics_context,
+        generate_image_backend=generate_image_backend,
+    )
+    if await handle_awaiting_image_prompt(
+        bot=bot,
+        message=message,
+        user_id=user_id,
+        user_text=user_text,
+        now=now,
+        photo_gate=photo_gate,
+        image_cooldown_sec=IMAGE_COOLDOWN_SEC,
+        mode_to_image_style=MODE_TO_IMAGE_STYLE,
+        jobs=IMAGE_JOBS,
+        hooks=image_runtime_hooks,
+    ):
         return
     # --- /IMAGE GENERATION FLOW ---
 
@@ -2466,34 +2147,7 @@ async def on_set_model_callback(callback: types.CallbackQuery):
 
 @dp.callback_query(F.data == "imgcancel")
 async def cb_imgcancel(callback: types.CallbackQuery):
-    user_id = callback.from_user.id
-    job = IMAGE_JOBS.get(user_id)
-
-    if not job:
-        await callback.answer("Нечего отменять", show_alert=False)
-        return
-
-    # ставим флаг отмены
-    cancel_event: asyncio.Event = job["cancel_event"]
-    cancel_event.set()
-
-    status_task: asyncio.Task | None = job.get("status_task")
-    if status_task and not status_task.done():
-        status_task.cancel()
-
-
-    # пытаемся отменить задачу генерации (если жива)
-    gen_task: asyncio.Task | None = job.get("gen_task")
-    if gen_task and not gen_task.done():
-        gen_task.cancel()
-
-    # обновим статус-сообщение
-    try:
-        await callback.message.edit_text("⛔ Ок, отменил генерацию.", reply_markup=None)
-    except Exception:
-        pass
-
-    await callback.answer("Отменено")
+    await handle_image_cancel_callback(callback, IMAGE_JOBS)
 
 
 async def main():

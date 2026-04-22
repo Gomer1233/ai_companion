@@ -30,11 +30,12 @@
 - remaining launcher profile/settings/chat-lock helpers in `src/main.py` now route through `SQLiteRepositories`; direct SQLite usage is down to bootstrap/event logging paths
 - runtime event logging in `src/main.py` now routes through `SQLiteRepositories` instead of ad hoc launcher SQL
 - image provider selection, prompt translation, and backend generation now live in `src/core/image_service.py` instead of `src/main.py`
+- Telegram-side image job registry, status loop, cancel callback, and awaiting-image-prompt handler now live in `src/adapters/telegram/image_runtime.py` instead of `src/main.py`
 - `init_db()` now runs the shared SQLite migration path before legacy bootstrap helpers, so repository-backed conversation tables exist during launcher startup
 
 ## Next Step
 
-Continue `ALPHA-001 Finish Refactor + Boundaries` by extracting Telegram-side image status/message orchestration and remaining chat/conversation flow out of `src/main.py`, while keeping bootstrap-only DB setup isolated.
+Continue `ALPHA-001 Finish Refactor + Boundaries` by extracting the remaining chat/conversation orchestration out of `src/main.py`, while keeping bootstrap-only DB setup isolated.
 
 ## Risks / Notes
 
