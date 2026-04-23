@@ -34,11 +34,12 @@
 - chat prompt assembly, OpenRouter continuation glue, game-over marker stripping, audio intent detection, and story-state update now live in `src/core/chat_service.py` instead of `src/main.py`
 - reset side effects and reset audit logging now live in `src/core/reset_service.py` instead of `src/main.py`
 - mode switch, mode-picked state, and chef/rap submode persistence now live in `src/core/conversation_service.py` instead of ad hoc launcher calls
+- `src/core/legacy_runtime.py` is now a thin compatibility shell over `src/core/runtime_helpers.py` and no longer owns active runtime handler logic
 - `init_db()` now runs the shared SQLite migration path before legacy bootstrap helpers, so repository-backed conversation tables exist during launcher startup
 
 ## Next Step
 
-Continue `ALPHA-001 Finish Refactor + Boundaries` by reducing remaining Telegram UI-heavy mode branching, deciding bootstrap `init_db()` placement, and neutralizing remaining `legacy_runtime.py` active logic.
+Continue `ALPHA-001 Finish Refactor + Boundaries` by reducing remaining Telegram UI-heavy mode branching and deciding bootstrap `init_db()` placement.
 
 ## Risks / Notes
 
