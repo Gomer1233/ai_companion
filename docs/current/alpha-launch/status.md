@@ -37,9 +37,15 @@
 - `src/core/legacy_runtime.py` is now a thin compatibility shell over `src/core/runtime_helpers.py` and no longer owns active runtime handler logic
 - DB bootstrap now lives in `src/db/bootstrap.py`; `src/main.py` keeps only a thin `init_db()` wrapper and no longer owns direct `sqlite3.connect` or schema helpers
 
+## Verification
+
+- `pytest` focused refactor suite passed: `51 passed`.
+- `ruff` could not be executed because the current Python environment does not have `ruff` installed.
+- limited `mypy` could not be executed because the current Python environment does not have `mypy` installed.
+
 ## Next Step
 
-Finish `ALPHA-001` by running final focused verification and deciding whether the remaining Telegram UI-heavy mode branching is acceptable launcher/adapter scope for this PR.
+Treat `ALPHA-001` as code-complete pending optional toolchain install for `ruff`/`mypy`, then push the branch and move to `ALPHA-002 FastAPI HTTP Adapter on Railway`.
 
 ## Risks / Notes
 
