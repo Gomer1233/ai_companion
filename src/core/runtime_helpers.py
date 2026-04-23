@@ -203,7 +203,8 @@ def estimate_tokens(text: str, model: str = "") -> int:
             encoding = tiktoken.get_encoding("cl100k_base")
         return len(encoding.encode(text))
     except Exception:
-        return 0
+        # Keep analytics useful in lean runtime/test environments without tiktoken.
+        return max(1, len(text) // 4)
 
 
 _SCENE_CONTRACT_RE = re.compile(r"\[\[?SCENE_CONTRACT\]\]?\s*\n?\s*\{.*?\}", re.DOTALL)
