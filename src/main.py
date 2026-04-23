@@ -12,19 +12,13 @@ import re
 import time
 import asyncio
 import logging
-import sqlite3
-import base64
 import random
-import json
 from typing import Any, Dict, List
 from src.config.modes import (
     MODE_TO_SYSTEM_PROMPT,
     MODE_TO_IMAGE_STYLE,
     MODE_TO_SHORT_DESC,
     MODE_TO_MODEL,
-    MODE_TO_TEMPERATURE,
-    MODE_TO_MAX_TOKENS,
-    MODE_TO_FREQUENCY_PENALTY,
     MODE_CATALOG,
     MODE_TO_PREMISE,
 )
@@ -35,10 +29,14 @@ from aiogram.types import InlineKeyboardMarkup, InlineKeyboardButton
 from aiogram.types import ReplyKeyboardMarkup, KeyboardButton
 from aiogram.types import BufferedInputFile
 from aiogram.types.input_file import FSInputFile
+from src.adapters.telegram.image_runtime import (
+    ImageJobRegistry,
+    ImageRuntimeHooks,
+    handle_awaiting_image_prompt,
+    handle_image_cancel_callback,
+)
 
-from src.prompts.oldschool_rep import RAP_SUBMODE_PROMPTS, RAP_SUBMODE_DEFAULT_BPM
 from src.prompts.relationship import (
-    ensure_relationship_table,
     get_relationship_state,
     save_relationship_state,
     reset_relationship_state,
@@ -47,17 +45,24 @@ from src.prompts.relationship import (
     check_ghosting,
 )
 from src.prompts.lika_prompt import build_lika_system_prompt
+from src.app.settings import Settings
 from src.core.runtime_helpers import (
     call_openrouter_with_meta as shared_call_openrouter_with_meta,
     chunk_text,
-    estimate_tokens,
-    extract_json_object,
-    fix_truncated_reply,
-    is_truncated_for_glue,
     keep_typing,
-    strip_internal_thoughts,
-    strip_scene_contract,
 )
+from src.core.chat_service import (
+    build_chat_messages,
+    build_system_prompt as build_chat_system_prompt,
+    generate_chat_completion,
+    is_audio_request as is_audio_request_for_chat,
+    strip_game_over_markers as strip_chat_game_over_markers,
+    update_story_state,
+)
+from src.core.conversation_service import ConversationService, ModeSwitchAuditContext
+from src.core.image_service import ImageService
+from src.core.reset_service import ResetAuditContext, ResetService
+from src.db.bootstrap import initialize_sqlite_runtime_db
 from src.db.repositories import SQLiteRepositories, legacy_user_ref
 
 # ----------------------------
@@ -268,6 +273,23 @@ DUST_TTL_MAX = 30
 def _clamp(v: int, lo: int, hi: int) -> int:
     return lo if v < lo else hi if v > hi else v
 
+
+def dust_spawn(field: dict, count: int) -> None:
+    rnd = random.Random(field["rnd_seed"] ^ ((field["tick"] + 17) * 2654435761))
+    available = max(0, DUST_MAX_PARTICLES - len(field["particles"]))
+    for _ in range(min(count, available)):
+        field["particles"].append(
+            {
+                "x": rnd.randint(0, DUST_W - 1),
+                "y": rnd.randint(0, DUST_H - 1),
+                "dx": rnd.choice([-1, 0, 1]),
+                "dy": rnd.choice([-1, 0, 1]),
+                "ttl": rnd.randint(DUST_TTL_MIN, DUST_TTL_MAX),
+                "ch": rnd.choice(DUST_PARTICLE_CHARS),
+            }
+        )
+
+
 def dust_step(field: dict) -> None:
     field["tick"] += 1
     rnd = random.Random(field["rnd_seed"] ^ (field["tick"] * 1103515245))
@@ -344,341 +366,12 @@ async def send_random_photo(message: types.Message) -> None:
         return
     await message.answer_photo(FSInputFile(str(photo_path)))
 
-_translation_cache: dict[str, str] = {}
-
-async def translate_to_english(text: str) -> str:
-    if PROMPT_TRANSLATION_DEBUG:
-        logging.info("[translate][start] len=%s OPENAI_API_KEY=%s model=%s",
-                    len(text or ""), "SET" if OPENAI_API_KEY else "MISSING", TRANSLATION_MODEL)
-
-    # простая защита от повторов и лишних затрат
-    key = text.strip()
-    if not key:
-        return text
-    if key in _translation_cache:
-        return _translation_cache[key]
-
-    if not OPENAI_API_KEY:
-        if PROMPT_TRANSLATION_DEBUG:
-            logging.info("[translate][skip] OPENAI_API_KEY missing -> returning original")
-        return text
-
-
-    url = "https://api.openai.com/v1/chat/completions"
-    headers = {
-        "Authorization": f"Bearer {OPENAI_API_KEY}",
-        "Content-Type": "application/json",
-    }
-
-    system = (
-        "You are a translation engine. Translate the user's text to natural English.\n"
-        "Rules:\n"
-        "- Return ONLY the translated text, no quotes, no explanations.\n"
-        "- Preserve formatting, line breaks, punctuation.\n"
-        "- Do NOT translate code, model IDs, LoRA names, URLs, tokens, weights like (word:1.2).\n"
-        "- Keep proper nouns as-is.\n"
-    )
-
-    payload = {
-        "model": TRANSLATION_MODEL,
-        "messages": [
-            {"role": "system", "content": system},
-            {"role": "user", "content": text},
-        ],
-        "temperature": 0,
-    }
-
-    async with httpx.AsyncClient(timeout=60.0) as client:
-        r = await client.post(url, headers=headers, json=payload)
-
-    if r.status_code >= 400:
-        # не валим генерацию, просто вернём оригинал
-        logging.warning("Translation failed HTTP %s: %s", r.status_code, (r.text or "")[:300])
-        return text
-
-    data = r.json()
-    out = (data["choices"][0]["message"]["content"] or "").strip()
-    if out:
-        _translation_cache[key] = out
-        return out
-    return text
-
-
-async def maybe_translate_prompt(provider: str, prompt: str) -> str:
-    if PROMPT_TRANSLATION_DEBUG:
-        logging.info("[translate][enter] provider=%s enabled=%s target=%s for=%s",
-                    provider, PROMPT_TRANSLATION_ENABLED, PROMPT_TRANSLATION_TARGET_LANG, PROMPT_TRANSLATION_FOR)
-
-    if not PROMPT_TRANSLATION_ENABLED:
-        return prompt
-
-    p = provider.strip().lower()
-    if p not in PROMPT_TRANSLATION_FOR:
-        return prompt
-
-    if PROMPT_TRANSLATION_TARGET_LANG.lower() != "en":
-        return prompt
-
-    translated = await translate_to_english(prompt)
-    if PROMPT_TRANSLATION_DEBUG:
-        ru = (prompt or "").strip()
-        en = (translated or "").strip()
-        logging.info(
-            "\n========== TRANSLATION DEBUG ==========\n"
-            "provider=%s\n"
-            "RU:\n%s\n"
-            "EN:\n%s\n"
-            "same=%s\n"
-            "======================================",
-            p,
-            ru[:1200],
-            en[:1200],
-            str(ru == en)
-        )
-
-
-    if PROMPT_TRANSLATION_DEBUG:
-        ru = (prompt or "").strip()
-        en = (translated or "").strip()
-        if ru and en and en != ru:
-            logging.info(
-                "\n========== TRANSLATION DEBUG ==========\n"
-                "provider=%s\n"
-                "RU:\n%s\n"
-                "EN:\n%s\n"
-                "======================================",
-                p, ru, en
-            )
-
-    return translated
-
-
 # ----------------------------
 # DB
 # ----------------------------
 
-def ensure_user_profile_schema(cur: sqlite3.Cursor) -> None:
-    # Базовая таблица (на всякий случай)
-    cur.execute("""
-        CREATE TABLE IF NOT EXISTS user_profile (
-          user_id INTEGER PRIMARY KEY,
-          preferred_name TEXT,
-          preferred_title TEXT
-        )
-    """)
-
-    # Добавляем mode, если его ещё нет
-    try:
-        cur.execute("ALTER TABLE user_profile ADD COLUMN mode TEXT")
-    except sqlite3.OperationalError:
-        # column already exists
-        pass
-    
-    # --- chat lock fields ---
-    try:
-        cur.execute("ALTER TABLE user_profile ADD COLUMN chat_locked INTEGER NOT NULL DEFAULT 0")
-    except sqlite3.OperationalError:
-        pass
-
-    try:
-        cur.execute("ALTER TABLE user_profile ADD COLUMN lock_reason TEXT NOT NULL DEFAULT ''")
-    except sqlite3.OperationalError:
-        pass
-    # --- mode picked flag ---
-    try:
-        cur.execute("ALTER TABLE user_profile ADD COLUMN mode_picked INTEGER NOT NULL DEFAULT 0")
-    except sqlite3.OperationalError:
-        pass
-
-    
-    # --- /chat lock fields ---
-
-
-def ensure_mode_state_schema(cur: sqlite3.Cursor) -> None:
-    cur.execute("""
-        CREATE TABLE IF NOT EXISTS mode_state (
-          user_id INTEGER NOT NULL,
-          mode TEXT NOT NULL,
-          state_json TEXT NOT NULL,
-          updated_at INTEGER NOT NULL,
-          PRIMARY KEY (user_id, mode)
-        )
-    """)
-
-def ensure_photo_gate_schema(cur: sqlite3.Cursor) -> None:
-    """
-    Создаёт таблицу photo_gate, если её нет.
-    Если таблица уже была создана ранее (без новых колонок) — добавляет недостающие колонки.
-    """
-    cur.execute("""
-        CREATE TABLE IF NOT EXISTS photo_gate (
-          user_id INTEGER PRIMARY KEY,
-          score INTEGER NOT NULL DEFAULT 0,
-          attempts INTEGER NOT NULL DEFAULT 0,
-          last_ask_ts INTEGER NOT NULL DEFAULT 0,
-          cooldown_until_ts INTEGER NOT NULL DEFAULT 0,
-
-          awaiting_context INTEGER NOT NULL DEFAULT 0,
-          context_asked_ts INTEGER NOT NULL DEFAULT 0,
-
-          awaiting_image_prompt INTEGER NOT NULL DEFAULT 0,
-          image_cooldown_until_ts INTEGER NOT NULL DEFAULT 0
-        )
-    """)
-
-
-    cur.execute("PRAGMA table_info(photo_gate)")
-    existing = {row[1] for row in cur.fetchall()}  # row[1] = column name
-
-    needed = {
-        "score": "INTEGER NOT NULL DEFAULT 0",
-        "attempts": "INTEGER NOT NULL DEFAULT 0",
-        "last_ask_ts": "INTEGER NOT NULL DEFAULT 0",
-        "cooldown_until_ts": "INTEGER NOT NULL DEFAULT 0",
-
-        "awaiting_context": "INTEGER NOT NULL DEFAULT 0",
-        "context_asked_ts": "INTEGER NOT NULL DEFAULT 0",
-
-        "awaiting_image_prompt": "INTEGER NOT NULL DEFAULT 0",
-        "image_cooldown_until_ts": "INTEGER NOT NULL DEFAULT 0",
-    }
-
-
-    for col, ddl in needed.items():
-        if col not in existing:
-            cur.execute(f"ALTER TABLE photo_gate ADD COLUMN {col} {ddl}")
-    
-    
-    try:
-        cur.execute("ALTER TABLE photo_gate ADD COLUMN awaiting_prompt INTEGER NOT NULL DEFAULT 0")
-    except Exception:
-        pass
-
-def ensure_user_events_schema(cur: sqlite3.Cursor) -> None:
-    cur.execute("PRAGMA table_info(user_events)")
-    existing = {row[1] for row in cur.fetchall()}
-
-    needed = {
-        # кто/что посчитали по LLM
-        "llm_provider": "TEXT NOT NULL DEFAULT ''",
-        "llm_model": "TEXT NOT NULL DEFAULT ''",
-        "prompt_tokens": "INTEGER NOT NULL DEFAULT 0",
-        "completion_tokens": "INTEGER NOT NULL DEFAULT 0",
-        "total_tokens": "INTEGER NOT NULL DEFAULT 0",
-        "tokens_source": "TEXT NOT NULL DEFAULT ''",  # 'api' | 'tiktoken' | ''
-    }
-
-    for col, ddl in needed.items():
-        if col not in existing:
-            cur.execute(f"ALTER TABLE user_events ADD COLUMN {col} {ddl}")
-
-    # индекс под отчёты по стоимости
-    try:
-        cur.execute("CREATE INDEX IF NOT EXISTS idx_user_events_llm ON user_events(date(ts, 'unixepoch'), llm_model)")
-    except Exception:
-        pass
-
-
 def init_db() -> None:
-    conn = sqlite3.connect(DB_PATH)
-    try:
-        cur = conn.cursor()
-
-        # ----------------------------
-        # MODE LOCK (per-mode)
-        # ----------------------------
-        cur.execute("""
-            CREATE TABLE IF NOT EXISTS mode_lock (
-              user_id INTEGER NOT NULL,
-              mode TEXT NOT NULL,
-              locked INTEGER NOT NULL DEFAULT 0,
-              reason TEXT NOT NULL DEFAULT '',
-              updated_at INTEGER NOT NULL,
-              PRIMARY KEY (user_id, mode)
-            )
-        """)
-
-        cur.execute("""
-            CREATE TABLE IF NOT EXISTS user_settings (
-              user_id INTEGER PRIMARY KEY,
-              model TEXT NOT NULL,
-              image_model TEXT NOT NULL DEFAULT '',
-              image_provider TEXT NOT NULL DEFAULT 'openrouter'
-            )
-        """)
-
-        cur.execute("PRAGMA table_info(user_settings)")
-        _cols = {row[1] for row in cur.fetchall()}
-
-        if "image_model" not in _cols:
-            cur.execute("ALTER TABLE user_settings ADD COLUMN image_model TEXT NOT NULL DEFAULT ''")
-
-        if "image_provider" not in _cols:
-            cur.execute("ALTER TABLE user_settings ADD COLUMN image_provider TEXT NOT NULL DEFAULT 'openrouter'")
-
-
-        cur.execute("""
-            CREATE TABLE IF NOT EXISTS user_messages (
-              id INTEGER PRIMARY KEY AUTOINCREMENT,
-              user_id INTEGER NOT NULL,
-              role TEXT NOT NULL CHECK(role IN ('user','assistant')),
-              content TEXT NOT NULL,
-              created_at INTEGER NOT NULL
-            )
-        """)
-
-        # --- MIGRATION: user_messages.mode ---
-        cur.execute("PRAGMA table_info(user_messages)")
-        _cols = {row[1] for row in cur.fetchall()}
-        if "mode" not in _cols:
-            cur.execute("ALTER TABLE user_messages ADD COLUMN mode TEXT NOT NULL DEFAULT 'basic'")
-            cur.execute("CREATE INDEX IF NOT EXISTS idx_user_messages_user_id_mode ON user_messages(user_id, mode)")
-        # --- /MIGRATION ---
- 
-        cur.execute("CREATE INDEX IF NOT EXISTS idx_user_messages_user_id ON user_messages(user_id)")
-
-        ensure_photo_gate_schema(cur)
-
-        ensure_user_profile_schema(cur)
-
-        ensure_mode_state_schema(cur)
-
-        # ----------------------------
-        # USER EVENTS (analytics log)
-        # ----------------------------
-        cur.execute("""
-            CREATE TABLE IF NOT EXISTS user_events (
-              id INTEGER PRIMARY KEY AUTOINCREMENT,
-              ts INTEGER NOT NULL,                  -- unix time
-              user_id INTEGER NOT NULL,
-              chat_id INTEGER NOT NULL DEFAULT 0,
-              username TEXT NOT NULL DEFAULT '',
-              first_name TEXT NOT NULL DEFAULT '',
-              event_type TEXT NOT NULL,             -- message | switch_mode | photo_button | photo_request | photo_result
-              mode TEXT NOT NULL DEFAULT '',         -- current mode at event time
-
-              mode_from TEXT NOT NULL DEFAULT '',
-              mode_to   TEXT NOT NULL DEFAULT '',
-
-              message_id INTEGER NOT NULL DEFAULT 0,
-              text_len   INTEGER NOT NULL DEFAULT 0,
-
-              photo_provider TEXT NOT NULL DEFAULT '',
-              photo_model    TEXT NOT NULL DEFAULT '',
-              ok INTEGER NOT NULL DEFAULT 1,
-              note TEXT NOT NULL DEFAULT ''
-            )
-        """)
-        ensure_user_events_schema(cur)
-        ensure_relationship_table(DB_PATH)
-
-        cur.execute("CREATE INDEX IF NOT EXISTS idx_user_events_user_ts ON user_events(user_id, ts)")
-        cur.execute("CREATE INDEX IF NOT EXISTS idx_user_events_ts ON user_events(ts)")
-        cur.execute("CREATE INDEX IF NOT EXISTS idx_user_events_type ON user_events(event_type)")
-
-        conn.commit()
-    finally:
-        conn.close()
+    initialize_sqlite_runtime_db(DB_PATH)
 
 def log_user_event(
     *,
@@ -705,122 +398,64 @@ def log_user_event(
     tokens_source: str = "",
 ) -> None:
     """
-    Пишет 1 событие в user_events. Никогда не кидает исключение наружу.
+    ?????????? 1 ?????????????? ?? user_events. ?????????????? ???? ???????????? ???????????????????? ????????????.
     """
     try:
-        conn = sqlite3.connect(DB_PATH)
-        try:
-            cur = conn.cursor()
-            cur.execute(
-                """
-                INSERT INTO user_events(
-                    ts, user_id, chat_id, username, first_name,
-                    event_type, mode, mode_from, mode_to,
-                    message_id, text_len,
-                    photo_provider, photo_model, ok, note,
-                    llm_provider, llm_model, prompt_tokens, completion_tokens, total_tokens, tokens_source
-                )
-                VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
-                """,
-                (
-                    int(ts), int(user_id), int(chat_id),
-                    (username or "").strip(),
-                    (first_name or "").strip(),
-                    (event_type or "").strip(),
-                    (mode or "").strip(),
-                    (mode_from or "").strip(),
-                    (mode_to or "").strip(),
-                    int(message_id or 0),
-                    int(text_len or 0),
-                    (photo_provider or "").strip(),
-                    (photo_model or "").strip(),
-                    1 if int(ok or 0) != 0 else 0,
-                    (note or "").strip(),
-
-                    (llm_provider or "").strip(),
-                    (llm_model or "").strip(),
-                    int(prompt_tokens or 0),
-                    int(completion_tokens or 0),
-                    int(total_tokens or 0),
-                    (tokens_source or "").strip(),
-                ),
-            )
-
-            conn.commit()
-        finally:
-            conn.close()
+        user_ref = legacy_user_ref(user_id)
+        DB_REPOSITORIES.append_legacy_user_event(
+            user_ref,
+            ts=ts,
+            chat_id=chat_id,
+            username=username,
+            first_name=first_name,
+            event_type=event_type,
+            mode=mode,
+            mode_from=mode_from,
+            mode_to=mode_to,
+            message_id=message_id,
+            text_len=text_len,
+            photo_provider=photo_provider,
+            photo_model=photo_model,
+            ok=ok,
+            note=note,
+            llm_provider=llm_provider,
+            llm_model=llm_model,
+            prompt_tokens=prompt_tokens,
+            completion_tokens=completion_tokens,
+            total_tokens=total_tokens,
+            tokens_source=tokens_source,
+        )
     except Exception:
-        # логирование не должно ломать бота
+        # ?????????????????????? ???? ???????????? ???????????? ????????
         pass
 
 
 def get_user_model(user_id: int) -> str:
-    conn = sqlite3.connect(DB_PATH)
-    try:
-        cur = conn.cursor()
-        cur.execute("SELECT model FROM user_settings WHERE user_id = ?", (user_id,))
-        row = cur.fetchone()
-        if row and row[0]:
-            return row[0]
-
-        # НЕ REPLACE: обновляем только model
-        cur.execute(
-            """
-            INSERT INTO user_settings(user_id, model)
-            VALUES(?, ?)
-            ON CONFLICT(user_id) DO UPDATE SET
-              model=excluded.model
-            """,
-            (user_id, DEFAULT_MODEL),
-        )
-        conn.commit()
-        return DEFAULT_MODEL
-    finally:
-        conn.close()
-
+    user_ref = legacy_user_ref(user_id)
+    return DB_REPOSITORIES.get_user_model(user_ref, default_model=DEFAULT_MODEL)
 
 def set_user_model(user_id: int, model: str) -> None:
-    conn = sqlite3.connect(DB_PATH)
-    try:
-        cur = conn.cursor()
-        # НЕ REPLACE: обновляем только model
-        cur.execute(
-            """
-            INSERT INTO user_settings(user_id, model)
-            VALUES(?, ?)
-            ON CONFLICT(user_id) DO UPDATE SET
-              model=excluded.model
-            """,
-            (user_id, model),
-        )
-        conn.commit()
-    finally:
-        conn.close()
+    user_ref = legacy_user_ref(user_id)
+    DB_REPOSITORIES.set_user_model(user_ref, model)
+
+APP_SETTINGS = Settings.from_env(project_root=PROJECT_ROOT)
+IMAGE_SERVICE = ImageService(settings=APP_SETTINGS, openrouter_client=openrouter_client)
+RESET_SERVICE = ResetService(
+    repositories=DB_REPOSITORIES,
+    user_ref_factory=legacy_user_ref,
+    repo_refs=_repo_refs,
+    log_user_event=log_user_event,
+    reset_relationship_state=reset_relationship_state,
+    db_path=DB_PATH,
+)
+
+
+def _image_analytics_context() -> tuple[str, str]:
+    return IMAGE_SERVICE.analytics_context()
 
 
 async def generate_image_backend(prompt: str) -> bytes:
-    """
-    Единственная точка входа для генерации картинки.
-    Переключается только через IMAGE_BACKEND_PROVIDER и env-переменные.
-    """
-    provider = (IMAGE_BACKEND_PROVIDER or "openrouter").strip().lower()
-
-    if provider == "openai":
-        return await openai_generate_image(prompt, model_override=OPENAI_IMAGE_MODEL)
-
-    if provider == "openrouter":
-        return await openrouter_generate_image(prompt, OPENROUTER_IMAGE_MODEL)
-
-    if provider == "modelslab":
-        return await modelslab_generate_image(prompt)
-    
-    if provider == "together":
-        return await together_generate_image(prompt, model=TOG_IMAGE_MODEL)
-    
-    if provider == "replicate":
-        raise RuntimeError("replicate backend not implemented yet")
-
-    raise RuntimeError(f"Unknown IMAGE_BACKEND_PROVIDER={provider}")
+    return await IMAGE_SERVICE.generate_image(prompt)
 
 
 def clear_history(user_id: int, mode: str | None = None) -> None:
@@ -836,23 +471,9 @@ def get_history(user_id: int, mode: str) -> List[Dict[str, Any]]:
     return DB_REPOSITORIES.load_history(user_ref, conversation_ref, mode)
 
 def get_active_dialog_stats(user_id: int) -> dict[str, int]:
-    """Сколько сообщений накоплено по каждому mode в user_messages."""
-    conn = sqlite3.connect(DB_PATH)
-    try:
-        cur = conn.cursor()
-        cur.execute(
-            """
-            SELECT mode, COUNT(*) as cnt
-            FROM user_messages
-            WHERE user_id = ?
-            GROUP BY mode
-            """,
-            (user_id,),
-        )
-        return {m: int(c) for (m, c) in cur.fetchall() if m}
-    finally:
-        conn.close()
-
+    """?????????????? ?????????????????? ?????????????????? ???? ?????????????? mode ?? user_messages."""
+    user_ref = legacy_user_ref(user_id)
+    return DB_REPOSITORIES.get_active_dialog_stats(user_ref)
 
 def get_photo_gate(user_id: int) -> Dict[str, int]:
     user_ref, conversation_ref = _repo_refs(user_id)
@@ -886,97 +507,19 @@ def upsert_photo_gate(
     )
 
 def get_user_profile(user_id: int) -> Dict[str, str]:
-    conn = sqlite3.connect(DB_PATH)
-    try:
-        cur = conn.cursor()
-        cur.execute("""
-            SELECT
-              preferred_name,
-              preferred_title,
-              COALESCE(mode, ''),
-              COALESCE(chat_locked, 0),
-              COALESCE(mode_picked, 0),
-              COALESCE(lock_reason, '')
-            FROM user_profile
-            WHERE user_id = ?
-        """, (user_id,))
-        row = cur.fetchone()
-        if not row:
-            return {
-                "preferred_name": "",
-                "preferred_title": "",
-                "mode": "",
-                "mode_picked": "0",
-                "chat_locked": "0",
-                "lock_reason": "",
-            }
-        return {
-            "preferred_name": row[0] or "",
-            "preferred_title": row[1] or "",
-            "mode": row[2] or "",
-            "chat_locked": str(int(row[3] or 0)),
-            "mode_picked": str(int(row[4] or 0)),
-            "lock_reason": row[5] or "",
-        }
-
-    finally:
-        conn.close()
+    user_ref = legacy_user_ref(user_id)
+    return DB_REPOSITORIES.get_user_profile(user_ref)
 
 GAME_OVER_MARKER = "[[GAME_OVER]]"
 
 # ловим и кривые варианты: [GAME_OVER]], [[GAME OVER]], [GAMT_OVER], и т.п.
-_GAME_OVER_RE = re.compile(
-    r"""
-    \[\[?\s*            # [ или [[
-    GA?M[E]?\s*         # GAME / GAM / опечатки
-    [_\s-]*             # _, пробел, -
-    OVE?R\s*            # OVER / OVR / опечатки
-    \]?\]               # ] или ]]
-    """,
-    re.IGNORECASE | re.VERBOSE
-)
-
-def strip_game_over_markers(text: str) -> tuple[str, bool]:
-    """
-    Возвращает (clean_text, triggered)
-    triggered=True если нашли хотя бы один маркер (даже кривой)
-    """
-    if not text:
-        return text, False
-    cleaned, n = _GAME_OVER_RE.subn("", text)
-    return cleaned.strip(), (n > 0)
-
-
 def lock_chat(user_id: int, reason: str = "") -> None:
-    conn = sqlite3.connect(DB_PATH)
-    try:
-        cur = conn.cursor()
-        # гарантируем строку в user_profile, чтобы UPDATE не был пустым
-        cur.execute("INSERT OR IGNORE INTO user_profile(user_id, preferred_name, preferred_title, mode) VALUES(?,?,?,?)",
-                    (user_id, "", "", "basic"))
-        cur.execute("""
-            UPDATE user_profile
-            SET chat_locked = 1,
-                lock_reason = ?
-            WHERE user_id = ?
-        """, (reason or "", user_id))
-        conn.commit()
-    finally:
-        conn.close()
+    user_ref = legacy_user_ref(user_id)
+    DB_REPOSITORIES.lock_chat(user_ref, reason)
 
 def unlock_chat(user_id: int) -> None:
-    conn = sqlite3.connect(DB_PATH)
-    try:
-        cur = conn.cursor()
-        cur.execute("""
-            UPDATE user_profile
-            SET chat_locked = 0,
-                lock_reason = ''
-            WHERE user_id = ?
-        """, (user_id,))
-        conn.commit()
-    finally:
-        conn.close()
+    user_ref = legacy_user_ref(user_id)
+    DB_REPOSITORIES.unlock_chat(user_ref)
 
 def is_chat_locked(profile: Dict[str, str]) -> tuple[bool, str]:
     locked = int(profile.get("chat_locked") or "0") == 1
@@ -1004,38 +547,18 @@ def set_user_profile(
     preferred_title: str | None = None,
     mode: str | None = None,
 ) -> None:
-    conn = sqlite3.connect(DB_PATH)
-    try:
-        cur = conn.cursor()
-        cur.execute("""
-            INSERT INTO user_profile(user_id, preferred_name, preferred_title, mode)
-            VALUES(?,?,?,?)
-            ON CONFLICT(user_id) DO UPDATE SET
-              preferred_name = COALESCE(excluded.preferred_name, user_profile.preferred_name),
-              preferred_title = COALESCE(excluded.preferred_title, user_profile.preferred_title),
-              mode = COALESCE(excluded.mode, user_profile.mode)
-        """, (user_id, preferred_name, preferred_title, mode))
-        conn.commit()
-    finally:
-        conn.close()
+    user_ref = legacy_user_ref(user_id)
+    DB_REPOSITORIES.set_user_profile(
+        user_ref,
+        preferred_name=preferred_name,
+        preferred_title=preferred_title,
+        mode=mode,
+    )
 
 
 def set_mode_picked(user_id: int, picked: bool) -> None:
-    conn = sqlite3.connect(DB_PATH)
-    try:
-        cur = conn.cursor()
-        cur.execute(
-            """
-            INSERT INTO user_profile(user_id, preferred_name, preferred_title, mode, mode_picked)
-            VALUES(?,?,?,?,?)
-            ON CONFLICT(user_id) DO UPDATE SET
-              mode_picked=excluded.mode_picked
-            """,
-            (user_id, "", "", "basic", 1 if picked else 0),
-        )
-        conn.commit()
-    finally:
-        conn.close()
+    user_ref = legacy_user_ref(user_id)
+    DB_REPOSITORIES.set_mode_picked(user_ref, picked)
 
 def default_mode_state(mode: str) -> Dict[str, Any]:
     return {
@@ -1049,6 +572,16 @@ def default_mode_state(mode: str) -> Dict[str, Any]:
         "open_threads": [],
         "recap": "",
     }
+
+
+CONVERSATION_SERVICE = ConversationService(
+    repositories=DB_REPOSITORIES,
+    user_ref_factory=legacy_user_ref,
+    repo_refs=_repo_refs,
+    log_user_event=log_user_event,
+    default_mode_state=default_mode_state,
+)
+
 
 def build_context_reminder(user_id: int, mode: str, history_n: int = 8) -> str:
     """
@@ -1130,76 +663,12 @@ def remind_context_kb() -> InlineKeyboardMarkup:
     )
 
 
-def format_state_block(state: Dict[str, Any]) -> str:
-    cast = state.get("cast") or []
-    timeline = state.get("timeline") or []
-    threads = state.get("open_threads") or []
-
-    cast_lines = []
-    for p in cast[:8]:
-        name = (p.get("name") or "").strip()
-        role = (p.get("role") or "").strip()
-        notes = (p.get("notes") or "").strip()
-        if not name:
-            continue
-        line = f"- {name} ({role})" if role else f"- {name}"
-        if notes:
-            line += f": {notes}"
-        cast_lines.append(line)
-
-    tl_lines = [f"- {x}" for x in timeline[-8:]]
-    th_lines = [f"- {x}" for x in threads[:8]]
-
-    return (
-        "\n\n[Состояние сюжета]\n"
-        f"Сезон: {state.get('season', 1)} | Эпизод: {state.get('episode', 1)}\n"
-        f"Локация: {state.get('location', '')}\n"
-        f"Завязка: {state.get('premise', '')}\n"
-        "Персонажи:\n" + ("\n".join(cast_lines) if cast_lines else "- (пока нет)") + "\n"
-        "Хронология (последнее):\n" + ("\n".join(tl_lines) if tl_lines else "- (пока нет)") + "\n"
-        "Открытые нити:\n" + ("\n".join(th_lines) if th_lines else "- (пока нет)") + "\n"
-        f"Кратко сейчас: {state.get('recap','')}\n"
-    )
-
-
 def get_mode_state(user_id: int, mode: str) -> Dict[str, Any]:
-    user_ref, conversation_ref = _repo_refs(user_id)
-    state = DB_REPOSITORIES.load_mode_state(user_ref, conversation_ref, mode)
-    if isinstance(state, dict):
-        return state
-    state = default_mode_state(mode)
-    DB_REPOSITORIES.save_mode_state(user_ref, conversation_ref, mode, state)
-    return state
+    return CONVERSATION_SERVICE.load_mode_state(user_id, mode)
 
 
 def save_mode_state(user_id: int, mode: str, state: Dict[str, Any]) -> None:
-    user_ref, conversation_ref = _repo_refs(user_id)
-    DB_REPOSITORIES.save_mode_state(user_ref, conversation_ref, mode, state)
-
-AUDIO_SYSTEM_PROMPT = """
-Ты говоришь голосом.
-Отвечай кратко: 2–4 предложения.
-Без списков.
-Без длинных объяснений.
-Разговорный стиль, как живой человек.
-Паузы и эмоции допустимы, но без воды.
-Говори так, будто записываешь короткое голосовое сообщение в мессенджере.
-"""
-
-def is_audio_request(text: str) -> bool:
-    t = (text or "").lower()
-    triggers = [
-        "запиши аудио",
-        "запиши мне аудио",
-        "голосом",
-        "озвучь",
-        "сделай аудиосообщение",
-        "сделай голосовое",
-        "голосовое сообщение",
-        "аудио-сообщение",
-        "аудиосообщение",
-    ]
-    return any(x in t for x in triggers)
+    CONVERSATION_SERVICE.save_mode_state(user_id, mode, state)
 
 # ----------------------------
 # OpenAI TTS (async)
@@ -1233,238 +702,6 @@ async def openai_tts(text: str) -> bytes:
         raise RuntimeError(f"OpenAI TTS returned non-audio: content-type={ctype}, body={body_preview}")
 
     return r.content
-
-async def openai_generate_image(prompt: str, model_override: str | None = None) -> bytes:
-    if not OPENAI_API_KEY:
-        raise RuntimeError("Missing env OPENAI_API_KEY")
-
-    url = "https://api.openai.com/v1/images/generations"
-    headers = {
-        "Authorization": f"Bearer {OPENAI_API_KEY}",
-        "Content-Type": "application/json",
-    }
-
-    model_to_use = (model_override or OPENAI_IMAGE_MODEL).strip()
-
-    payload = {
-        "model": model_to_use,
-        "prompt": prompt,
-        "size": OPENAI_IMAGE_SIZE,
-        "n": 1,
-    }
-
-    async with httpx.AsyncClient(timeout=120.0) as client:
-        r = await client.post(url, headers=headers, json=payload)
-
-    if r.status_code >= 400:
-        body_preview = (r.text or "")[:400]
-        raise RuntimeError(f"OpenAI Images HTTP {r.status_code}: {body_preview}")
-
-    data = r.json()
-    b64 = data["data"][0]["b64_json"]
-    return base64.b64decode(b64)
-
-
-def _data_url_to_bytes(data_url: str) -> bytes:
-    # ожидаем "data:image/png;base64,AAAA..."
-    if not data_url or not data_url.startswith("data:"):
-        raise RuntimeError("OpenRouter returned non-data-url image")
-
-    try:
-        header, b64 = data_url.split(",", 1)
-    except ValueError:
-        raise RuntimeError("Malformed data URL")
-
-    return base64.b64decode(b64)
-
-async def modelslab_generate_image(prompt: str) -> bytes:
-    
-    if not MODELSLAB_API_KEY:
-        raise RuntimeError("Missing MODELSLAB_API_KEY")
-    if not MODELSLAB_MODEL_ID:
-        raise RuntimeError("Missing MODELSLAB_MODEL_ID")
-    
-    prompt = await maybe_translate_prompt("modelslab", prompt)
-    negative = await maybe_translate_prompt("modelslab", MODELSLAB_NEGATIVE_PROMPT)
-
-    payload = {
-        "key": MODELSLAB_API_KEY,
-        "prompt": prompt,
-        "model_id": MODELSLAB_MODEL_ID,
-        "width": str(MODELSLAB_WIDTH),
-        "height": str(MODELSLAB_HEIGHT),
-        "negative_prompt": negative,
-        "num_inference_steps": str(MODELSLAB_STEPS),
-        "scheduler": MODELSLAB_SCHEDULER,
-        "guidance_scale": str(MODELSLAB_GUIDANCE),
-        "enhance_prompt": MODELSLAB_ENHANCE_PROMPT,
-    }
-    if MODELSLAB_LORA_MODEL:
-        payload["lora_model"] = MODELSLAB_LORA_MODEL
-
-    async with httpx.AsyncClient(timeout=180.0) as client:
-        r = await client.post(MODELSLAB_TEXT2IMG_URL, json=payload)
-
-    if r.status_code >= 400:
-        raise RuntimeError(f"ModelsLab HTTP {r.status_code}: {(r.text or '')[:600]}")
-
-    data = r.json()
-
-    # 1) Если output уже есть — берём сразу
-    urls = data.get("output") or data.get("proxy_links") or []
-    if urls:
-        return await _download_image_bytes(urls[0])
-
-    # 2) Часто future_links уже содержит прямую ссылку на файл — пробуем
-    future = data.get("future_links") or []
-    if future:
-        try:
-            return await _download_image_bytes(future[0])
-        except Exception:
-            # если ещё не готово — идём в fetch
-            pass
-
-    # 3) Если статус processing — polling через fetch_result
-    status = (data.get("status") or "").lower()
-    fetch_url = data.get("fetch_result")
-    if status == "processing" and fetch_url:
-        eta = data.get("eta") or 5
-
-        for _ in range(12):
-            await asyncio.sleep(int(eta))
-
-            async with httpx.AsyncClient(timeout=180.0) as client:
-                rr = await client.post(fetch_url, json={"key": MODELSLAB_API_KEY})
-
-            if rr.status_code >= 400:
-                raise RuntimeError(f"ModelsLab fetch HTTP {rr.status_code}: {(rr.text or '')[:400]}")
-
-            d2 = rr.json()
-
-            urls2 = d2.get("output") or d2.get("proxy_links") or []
-            if urls2:
-                return await _download_image_bytes(urls2[0])
-
-            future2 = d2.get("future_links") or []
-            if future2:
-                try:
-                    return await _download_image_bytes(future2[0])
-                except Exception:
-                    pass
-
-            eta = d2.get("eta") or eta
-
-        raise RuntimeError(f"ModelsLab: timeout waiting for image. Last response: {str(d2)[:800]}")
-
-
-    raise RuntimeError(f"ModelsLab: no image urls in response: {str(data)[:800]}")
-
-
-async def _download_image_bytes(url: str) -> bytes:
-    async with httpx.AsyncClient(timeout=120.0) as client:
-        r = await client.get(url)
-    if r.status_code >= 400:
-        raise RuntimeError(f"Image download failed HTTP {r.status_code}: {url}")
-    return r.content
-
-async def together_generate_image(prompt: str, model: str | None = None) -> bytes:
-    if not TOG_API_KEY:
-        raise RuntimeError("Missing env TOG_API_KEY")
-
-    base_url = (TOG_BASE_URL or "https://api.together.xyz/v1").rstrip("/")
-    url = f"{base_url}/images/generations"
-    headers = {
-        "Authorization": f"Bearer {TOG_API_KEY}",
-        "Content-Type": "application/json",
-    }
-
-    model_to_use = (model or TOG_IMAGE_MODEL).strip()
-
-    payload = {
-        "model": model_to_use,
-        "prompt": prompt,
-        "n": 1,
-        "width": int(TOG_WIDTH),
-        "height": int(TOG_HEIGHT),
-    }
-
-    # retry на 503/429 — у тебя уже всплывало "Service unavailable"
-    last_err: str | None = None
-    for attempt in range(1, 4):
-        try:
-            async with httpx.AsyncClient(timeout=240.0) as client:
-                r = await client.post(url, headers=headers, json=payload)
-
-                if r.status_code in (429, 503):
-                    last_err = r.text[:800] if r.text else ""
-                    await asyncio.sleep(1.5 * attempt)
-                    continue
-
-                if r.status_code >= 400:
-                    raise RuntimeError(f"Together Images HTTP {r.status_code}: {r.text[:800]}")
-
-                data = r.json()
-                item = (data.get("data") or [{}])[0]
-
-                b64 = item.get("b64_json")
-                if b64:
-                    return base64.b64decode(b64)
-
-                url_out = item.get("url")
-                if url_out:
-                    img_r = await client.get(url_out)
-                    if img_r.status_code >= 400:
-                        raise RuntimeError(
-                            f"Failed to download image URL {url_out}: HTTP {img_r.status_code}: {(img_r.text or '')[:200]}"
-                        )
-                    return img_r.content
-
-                raise RuntimeError(f"No b64_json or url in Together response: {json.dumps(data)[:900]}")
-        except Exception as e:
-            last_err = f"{type(e).__name__}: {repr(e)}"
-            await asyncio.sleep(0.7 * attempt)
-
-
-    raise RuntimeError(f"Together image generation failed after retries. Last error: {last_err}")
-
-
-async def openrouter_generate_image(prompt: str, image_model: str) -> bytes:
-    headers = {
-        "Authorization": f"Bearer {OPENROUTER_API_KEY}",
-        "Content-Type": "application/json",
-        "HTTP-Referer": OPENROUTER_SITE_URL,
-        "X-Title": OPENROUTER_APP_NAME,
-    }
-
-    payload = {
-        "model": image_model,
-        "messages": [{"role": "user", "content": prompt}],
-        "modalities": ["image", "text"],
-        "stream": False,
-    }
-
-    async with httpx.AsyncClient(timeout=120.0) as client:
-        r = await client.post(OPENROUTER_URL, headers=headers, json=payload)
-
-    if r.status_code >= 400:
-        body_preview = (r.text or "")[:400]
-        raise RuntimeError(f"OpenRouter Images HTTP {r.status_code}: {body_preview}")
-
-    data = r.json()
-
-    # В OpenRouter картинка приходит в message.images[0].image_url.url как data URL
-    try:
-        msg = data["choices"][0]["message"]
-        images = msg.get("images") or []
-        if not images:
-            raise KeyError("message.images empty")
-        data_url = images[0]["image_url"]["url"]
-    except Exception:
-        # для отладки полезно увидеть кусок ответа
-        preview = json.dumps(data, ensure_ascii=False)[:600]
-        raise RuntimeError(f"No images in OpenRouter response: {preview}")
-
-    return _data_url_to_bytes(data_url)
 
 # ----------------------------
 # OpenRouter call (async)
@@ -1547,17 +784,6 @@ async def call_openrouter_with_meta(
         timeout_s=timeout_s,
     )
 
-
-MAX_AUTO_CONTINUATIONS = int(os.getenv("MAX_AUTO_CONTINUATIONS", "2"))
-
-_CONTINUE_PROMPT = (
-    "Продолжи предыдущий ответ ровно с места обрыва. "
-    "Не повторяй уже сказанное. "
-    "НЕ извиняйся и НЕ упоминай, что ответ был прерван. "
-    "Просто продолжай по делу и закончи логично."
-)
-
-
 # ----------------------------
 # Telegram bot
 # ----------------------------
@@ -1568,202 +794,7 @@ dp = Dispatcher()
 # IMAGE GENERATION: live status + cancel
 # ----------------------------
 
-IMAGE_STATUS_INTERVAL_SEC = 3.0  # как часто менять фразу/прогресс
-IMAGE_VANISH_SEC = 0.6           # "испарение" (короткая пауза между фразами)
-PROGRESS_BAR_LEN = 14
-
-# Храним активные генерации по user_id
-IMAGE_JOBS: Dict[int, Dict[str, Any]] = {}
-
-IMAGE_FUN_PHRASES = [
-    "Запускаю сигнатуры…",
-    "Тестирую на котиках…",
-    "Сверяюсь с реестром ламантинов…",
-    "Разогреваю нейроны до рабочей температуры…",
-    "Проверяю, не подменили ли пиксели на поддельные…",
-    "Собираю пиксели в правильном порядке…",
-    "Уговариваю алгоритм быть красивым…",
-    "Протираю объектив матрицы…",
-    "Вызываю духов композиции и света…",
-    "Настраиваю баланс магии и здравого смысла…",
-    "Делаю вид, что понимаю современное искусство…",
-    "Согласовываю результат с кото-комиссией…",
-
-    "Калибрую тени и полутона…",
-    "Выравниваю реальность с ожиданиями…",
-    "Проверяю, не поплыл ли горизонт…",
-    "Подкручиваю эстетические коэффициенты…",
-    "Оптимизирую количество красоты на пиксель…",
-    "Проверяю симметрию вселенной…",
-    "Соблюдаю технику художественной безопасности…",
-    "Пересчитываю пропорции на салфетке…",
-    "Подгоняю результат под законы жанра…",
-    "Слежу, чтобы лишние конечности не появились…",
-    "Фиксирую композицию до стабильно красивой…",
-    "Снижаю энтропию изображения…",
-
-    "Проверяю, не убежал ли стиль…",
-    "Уточняю художественное намерение…",
-    "Формирую финальный визуальный замысел…",
-    "Сверяю результат с внутренним вкусом…",
-    "Навожу последний визуальный лоск…",
-    "Собираю финальный образ…",
-    "Проверяю картинку на соответствие реальности…",
-]
-
-IMAGE_FUN_EMOJIS = [
-    "🎲", "🧩", "⚙️", "🔮", "🫧", "✨", "🧪", "📐", "📊",
-    "🧠", "🎛️", "🪄", "🌀", "🧿", "🎯", "📎", "🔧",
-]
-# --- strip SCENE_CONTRACT blocks from visible output ---
-_SCENE_CONTRACT_RE = re.compile(
-    r"\[\[?SCENE_CONTRACT\]\]?\s*\n?\s*\{.*?\}",
-    re.DOTALL
-)
-
-def strip_scene_contract(text: str) -> str:
-    """
-    Убирает служебный блок SCENE_CONTRACT, если модель его напечатала в ответ.
-    Поддерживает варианты [SCENE_CONTRACT] и [[SCENE_CONTRACT]].
-    """
-    if not text:
-        return text
-    cleaned = _SCENE_CONTRACT_RE.sub("", text)
-    return cleaned.strip()
-
-
-# ----------------------------
-# STATUS RENDER MODE
-# ----------------------------
-
-def _progress_bar(tick: int, length: int = PROGRESS_BAR_LEN) -> str:
-    # "бегунок" туда-сюда (не знает реального прогресса, но выглядит живо)
-    if length < 6:
-        length = 6
-    span = length - 4
-    p = tick % (2 * span)
-    pos = p if p <= span else (2 * span - p)
-    left = "░" * pos
-    mid = "▓▓▓▓"
-    right = "░" * (span - pos)
-    return f"[{left}{mid}{right}]"
-
-def _spinner(tick: int) -> str:
-    frames = ["⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏"]
-    return frames[tick % len(frames)]
-
-def image_cancel_kb() -> InlineKeyboardMarkup:
-    return InlineKeyboardMarkup(
-        inline_keyboard=[[InlineKeyboardButton(text="⛔ Отмена", callback_data="imgcancel")]]
-    )
-FADE_FRAMES = [
-    "⋯⋯⋯⋯⋯",
-    "⋯⋯⋯⋯",
-    "⋯⋯⋯",
-    "⋯⋯",
-    "⋯",
-    "·",
-    "\u200b",  # zero-width space: выглядит как "пусто", но Telegram принимает
-]
-DUST_FADE_CHARS = ["·", "⋅", "•", "✧"]
-
-
-def make_dust_frame(count: int) -> str:
-    """
-    Возвращает строку с 'распадающимися' точками.
-    Пример: '·   · ·'
-    """
-    if count <= 0:
-        return "\u200b"  # визуально пусто, но Telegram принимает
-
-    parts = []
-    for _ in range(count):
-        parts.append(random.choice(DUST_FADE_CHARS))
-        # случайные промежутки — ключ к эффекту распада
-        parts.append(" " * random.randint(1, 3))
-
-    return "".join(parts).rstrip()
-
-
-async def fade_out_text(bot: Bot, chat_id: int, message_id: int) -> bool:
-    """
-    Имитирует 'распад' текста: точки рассыпаются и исчезают.
-    ВАЖНО: без reply_markup. Иначе будут жить кнопки/бардак.
-    """
-    start = random.randint(5, 7)
-
-    for n in range(start, -1, -1):
-        frame = make_dust_frame(n)
-        try:
-            await bot.edit_message_text(
-                chat_id=chat_id,
-                message_id=message_id,
-                text=frame,
-                reply_markup=None,   # <-- ключевое
-            )
-        except Exception as e:
-            if "message is not modified" in str(e).lower():
-                await asyncio.sleep(0.06)
-                continue
-            return False
-
-        await asyncio.sleep(0.10)
-
-    return True
-
-IMAGE_FUN_VISIBLE_SEC = 2.0  # сколько висит смешной пузырь до распыления
-
-def render_fun_phrase_only() -> str:
-    emoji = random.choice(IMAGE_FUN_EMOJIS)
-    if random.random() < 0.25:
-        emoji += random.choice(IMAGE_FUN_EMOJIS)
-    phrase = random.choice(IMAGE_FUN_PHRASES)
-    return f"{emoji} {phrase}"
-
-async def run_image_fun_only_loop(
-    bot: Bot,
-    chat_id: int,
-    cancel_event: asyncio.Event,
-) -> None:
-    """
-    СТРОГО:
-    1) отправили смешную фразу
-    2) подождали ~2 сек
-    3) распылили и удалили
-    4) следующая
-    Никаких прогрессбаров и отдельных "генерация..." сообщений.
-    """
-    try:
-        while not cancel_event.is_set():
-            # 1) пузырь со смешной фразой
-            try:
-                msg = await bot.send_message(chat_id, render_fun_phrase_only())
-            except Exception:
-                return
-
-            # 2) висит 2 сек
-            await asyncio.sleep(IMAGE_FUN_VISIBLE_SEC)
-            if cancel_event.is_set():
-                try:
-                    await bot.delete_message(chat_id, msg.message_id)
-                except Exception:
-                    pass
-                return
-
-            # 3) распыление + удаление
-            try:
-                await fade_out_text(bot, chat_id, msg.message_id)
-            except Exception:
-                pass
-            try:
-                await bot.delete_message(chat_id, msg.message_id)
-            except Exception:
-                pass
-
-            # 4) следующая — без доп. пауз (строго как ты просишь)
-
-    except asyncio.CancelledError:
-        return
+IMAGE_JOBS = ImageJobRegistry()
 
 
 def build_models_keyboard(models: List[str]) -> InlineKeyboardMarkup:
@@ -1843,28 +874,18 @@ async def reset_btn(message: types.Message):
     await cmd_reset(message)
 
 async def _reset_current_mode(user_id: int, mode: str, *, note: str, chat_id: int, username: str, first_name: str, message_id: int, text_len: int) -> str:
-    now_ts = int(time.time())
-    log_user_event(
-        ts=now_ts,
-        user_id=user_id,
-        chat_id=chat_id,
-        username=username,
-        first_name=first_name,
-        event_type="reset",
-        mode=mode,
-        message_id=message_id,
-        text_len=text_len,
-        ok=1,
+    return RESET_SERVICE.reset_current_mode(
+        user_id,
+        mode,
         note=note,
+        audit=ResetAuditContext(
+            chat_id=chat_id,
+            username=username,
+            first_name=first_name,
+            message_id=message_id,
+            text_len=text_len,
+        ),
     )
-
-    user_ref, conversation_ref = _repo_refs(user_id)
-    DB_REPOSITORIES.reset_mode_in_conversation(user_ref, conversation_ref, mode)
-
-    if mode == "whore":
-        reset_relationship_state(DB_PATH, user_id, mode)
-
-    return mode
 
 
 @dp.message(F.text == "Сброс персонажа")
@@ -2080,6 +1101,19 @@ def build_rap_submode_keyboard(current: str | None = None) -> InlineKeyboardMark
     return InlineKeyboardMarkup(inline_keyboard=rows)
 
 
+def build_modes_keyboard(user_id: int, current_mode: str | None = None) -> InlineKeyboardMarkup:
+    rows: list[list[InlineKeyboardButton]] = []
+    current = (current_mode or "").strip()
+    stats = get_active_dialog_stats(user_id)
+
+    for title, mode in MODE_CATALOG:
+        marker = " ✓" if mode == current else ""
+        prefix = "↩️ " if stats.get(mode, 0) else "🆕 "
+        rows.append([InlineKeyboardButton(text=f"{prefix}{title}{marker}", callback_data=f"setmode:{mode}")])
+
+    return InlineKeyboardMarkup(inline_keyboard=rows)
+
+
 @dp.message(Command("mode"))
 async def cmd_mode(message: types.Message):
     user_id = message.from_user.id
@@ -2118,9 +1152,7 @@ async def cb_rapmode(callback: types.CallbackQuery):
         return
 
     # сохраняем выбор в mode_state для mode="oldschool_rep"
-    st = get_mode_state(user_id, "oldschool_rep")
-    st["rap_submode"] = picked
-    save_mode_state(user_id, "oldschool_rep", st)
+    CONVERSATION_SERVICE.set_rap_submode(user_id, picked)
 
     await callback.answer("Ок")
 
@@ -2170,26 +1202,16 @@ async def cb_setmode(callback: types.CallbackQuery):
         await callback.answer("Неизвестный режим", show_alert=True)
         return
 
-    # 1) сохраняем режим
-    user_ref, conversation_ref = _repo_refs(user_id)
-    DB_REPOSITORIES.set_active_mode(user_ref, conversation_ref, mode)
-    set_mode_picked(user_id, True)
-
-    # --- LOG: switch_mode ---
-    now_ts = int(time.time())
-    log_user_event(
-        ts=now_ts,
-        user_id=user_id,
-        chat_id=int(callback.message.chat.id) if callback.message and callback.message.chat else 0,
-        username=(callback.from_user.username or ""),
-        first_name=(callback.from_user.first_name or ""),
-        event_type="switch_mode",
-        mode=mode,              # новый текущий
-        mode_from=prev_mode,    # старый
-        mode_to=mode,           # новый
-        message_id=int(callback.message.message_id) if callback.message else 0,
-        text_len=0,
-        ok=1,
+    CONVERSATION_SERVICE.switch_mode(
+        user_id,
+        mode,
+        prev_mode=prev_mode,
+        audit=ModeSwitchAuditContext(
+            chat_id=int(callback.message.chat.id) if callback.message and callback.message.chat else 0,
+            username=(callback.from_user.username or ""),
+            first_name=(callback.from_user.first_name or ""),
+            message_id=int(callback.message.message_id) if callback.message else 0,
+        ),
     )
 
 
@@ -2241,8 +1263,7 @@ async def cb_setmode(callback: types.CallbackQuery):
         # если sub не выбран — дефолт story, но всё равно спросим (UX)
         if not sub:
             sub = "story"
-            st["rap_submode"] = sub
-            save_mode_state(user_id, "oldschool_rep", st)
+            st = CONVERSATION_SERVICE.ensure_rap_submode(user_id, sub)
 
         kb = build_rap_submode_keyboard(current=sub)
 
@@ -2300,9 +1321,7 @@ async def cb_chefmode(callback: types.CallbackQuery):
         return
 
     # сохраняем выбор в mode_state для mode="chef"
-    st = get_mode_state(user_id, "chef")
-    st["chef_submode"] = picked
-    save_mode_state(user_id, "chef", st)
+    CONVERSATION_SERVICE.set_chef_submode(user_id, picked)
 
     # короткое подтверждение
     label = "по-домашнему" if picked == "home" else "как в ресторане"
@@ -2329,29 +1348,19 @@ async def cmd_reset(message: types.Message):
     prev_profile = get_user_profile(user_id)
     prev_mode = (prev_profile.get("mode") or "basic").strip()
 
-    log_user_event(
-        ts=int(time.time()),
-        user_id=user_id,
-        chat_id=int(message.chat.id) if message.chat else 0,
-        username=(message.from_user.username or ""),
-        first_name=(message.from_user.first_name or ""),
-        event_type="reset",
-        mode="basic",
-        mode_from=prev_mode,
-        mode_to="basic",
-        message_id=int(message.message_id),
-        text_len=len((message.text or "")),
-        ok=1,
-        note="scope=all",
+    RESET_SERVICE.reset_user_all(
+        user_id,
+        prev_mode=prev_mode,
+        audit=ResetAuditContext(
+            chat_id=int(message.chat.id) if message.chat else 0,
+            username=(message.from_user.username or ""),
+            first_name=(message.from_user.first_name or ""),
+            message_id=int(message.message_id),
+            text_len=len((message.text or "")),
+        ),
     )
-
-    unlock_chat(user_id)
-    user_ref = legacy_user_ref(user_id)
-    DB_REPOSITORIES.reset_user_all(user_ref)
     set_mode_picked(user_id, False)
-    IMAGE_JOBS.pop(user_id, None)
-
-    reset_relationship_state(DB_PATH, user_id, "whore")
+    IMAGE_JOBS.clear(user_id)
 
     await message.answer(
         "\u0421\u0431\u0440\u043e\u0441 \u0441\u0434\u0435\u043b\u0430\u043b.\n"
@@ -2392,190 +1401,43 @@ async def on_text(message: types.Message):
 
     # --- CANCEL by text (без лишних пузырей) ---
     if user_text.lower() in ("отмена", "⛔ отмена", "/cancel"):
-        job = IMAGE_JOBS.get(user_id)
-        if job:
-            cancel_event: asyncio.Event = job["cancel_event"]
-            cancel_event.set()
-
-            gen_task: asyncio.Task | None = job.get("gen_task")
-            if gen_task and not gen_task.done():
-                gen_task.cancel()
-
-            # никаких сообщений от бота (чтобы не ломать правило "только смешные фразы")
+        if await IMAGE_JOBS.cancel(user_id):
             return
 
     # --- PATCH: awaiting_context должен обрабатываться ДО is_photo_request ---
     photo_gate = get_photo_gate(user_id)
 
     # --- HARD LOCK: если уже идёт генерация, новые сообщения НЕ запускают новые генерации ---
-    job = IMAGE_JOBS.get(user_id)
-    if job and isinstance(job, dict):
-        cancel_event = job.get("cancel_event")
-        if cancel_event and not cancel_event.is_set():
-            await message.answer("⏳ Генерация уже идёт. Дождись завершения или нажми «Отмена».")
-            return
+    if IMAGE_JOBS.is_active(user_id):
+        await message.answer("⏳ Генерация уже идёт. Дождись завершения или нажми «Отмена».")
+        return
 
 
     # --- IMAGE GENERATION FLOW (awaiting prompt) ---
-    if int(photo_gate.get("awaiting_image_prompt") or 0) == 1:
-        cd_until = int(photo_gate.get("image_cooldown_until_ts") or 0)
-        if cd_until > now:
-            left = cd_until - now
-            await message.answer(f"Кулдаун. Подожди ещё {left // 60 + 1} мин.")
-            return
-
-        # Сразу выходим из режима ожидания промпта, чтобы не запускать генерацию повторно
-        upsert_photo_gate(
-            user_id=user_id,
-            score=photo_gate["score"],
-            attempts=photo_gate["attempts"],
-            last_ask_ts=now,
-            cooldown_until_ts=photo_gate["cooldown_until_ts"],
-            awaiting_context=photo_gate["awaiting_context"],
-            context_asked_ts=photo_gate["context_asked_ts"],
-            awaiting_image_prompt=0,
-            image_cooldown_until_ts=photo_gate.get("image_cooldown_until_ts", 0),
-        )
-        photo_gate["awaiting_image_prompt"] = 0
-
-        # Регистрируем активную задачу (HARD LOCK выше начнёт игнорировать любые новые сообщения)
-        cancel_event = asyncio.Event()
-        IMAGE_JOBS[user_id] = {"cancel_event": cancel_event, "status_task": None, "gen_task": None}
-
-        # 1) Параллельно крутим ТОЛЬКО смешные фразы (каждая живёт 2 сек и распыляется)
-        status_task = asyncio.create_task(run_image_fun_only_loop(bot, message.chat.id, cancel_event))
-        IMAGE_JOBS[user_id]["status_task"] = status_task
-
-        # 2) Запускаем генерацию
-        profile = get_user_profile(user_id)
-        mode = (profile.get("mode") or "basic").strip()
-        style_hint = MODE_TO_IMAGE_STYLE.get(mode, MODE_TO_IMAGE_STYLE["basic"])
-
-        image_prompt = f"Стиль/арт-дирекшн: {style_hint}\nЗапрос пользователя: {user_text}"
-        
-        # --- LOG: photo_request (описание, которое пошло в генерацию) ---
-        log_user_event(
-            ts=now,
-            user_id=user_id,
-            chat_id=int(message.chat.id) if message.chat else 0,
-            username=(message.from_user.username or ""),
-            first_name=(message.from_user.first_name or ""),
-            event_type="photo_request",
-            mode=mode,
-            message_id=int(message.message_id),
-            text_len=len(user_text),
-            photo_provider=(IMAGE_BACKEND_PROVIDER or ""),
-            photo_model=(OPENROUTER_IMAGE_MODEL if (IMAGE_BACKEND_PROVIDER or "").strip().lower() == "openrouter" else (OPENAI_IMAGE_MODEL if (IMAGE_BACKEND_PROVIDER or "").strip().lower() == "openai" else "")),
-            ok=1,
-        )
-
-        gen_task = asyncio.create_task(generate_image_backend(image_prompt))
-        IMAGE_JOBS[user_id]["gen_task"] = gen_task
-
-        try:
-            img_bytes = await gen_task
-        except asyncio.CancelledError:
-            # Отмена — тихо останавливаем цикл фраз и выходим
-            cancel_event.set()
-            try:
-                status_task.cancel()
-            except Exception:
-                pass
-            IMAGE_JOBS.pop(user_id, None)
-            
-            # --- LOG: photo_result cancel ---
-            log_user_event(
-                ts=int(time.time()),
-                user_id=user_id,
-                chat_id=int(message.chat.id) if message.chat else 0,
-                username=(message.from_user.username or ""),
-                first_name=(message.from_user.first_name or ""),
-                event_type="photo_result",
-                mode=mode,
-                message_id=int(message.message_id),
-                text_len=len(user_text),
-                photo_provider=(IMAGE_BACKEND_PROVIDER or ""),
-                photo_model=(OPENROUTER_IMAGE_MODEL if (IMAGE_BACKEND_PROVIDER or "").strip().lower() == "openrouter" else (OPENAI_IMAGE_MODEL if (IMAGE_BACKEND_PROVIDER or "").strip().lower() == "openai" else "")),
-                ok=0,
-                note="cancelled",
-            )
-
-            return
-        except Exception as e:
-            logging.exception("Image generation failed (provider=%s user_id=%s): %s", IMAGE_BACKEND_PROVIDER, user_id, e)
-            cancel_event.set()
-            try:
-                status_task.cancel()
-            except Exception:
-                pass
-            IMAGE_JOBS.pop(user_id, None)
-            
-            # --- LOG: photo_result error ---
-            log_user_event(
-                ts=int(time.time()),
-                user_id=user_id,
-                chat_id=int(message.chat.id) if message.chat else 0,
-                username=(message.from_user.username or ""),
-                first_name=(message.from_user.first_name or ""),
-                event_type="photo_result",
-                mode=mode,
-                message_id=int(message.message_id),
-                text_len=len(user_text),
-                photo_provider=(IMAGE_BACKEND_PROVIDER or ""),
-                photo_model=(OPENROUTER_IMAGE_MODEL if (IMAGE_BACKEND_PROVIDER or "").strip().lower() == "openrouter" else (OPENAI_IMAGE_MODEL if (IMAGE_BACKEND_PROVIDER or "").strip().lower() == "openai" else "")),
-                ok=0,
-                note=f"error: {type(e).__name__}",
-            )
-
-            await message.answer("Не получилось сгенерировать картинку. (см. лог ошибок)")
-            return
-
-        # Генерация закончилась — стопаем цикл фраз
-        cancel_event.set()
-        try:
-            status_task.cancel()
-        except Exception:
-            pass
-        IMAGE_JOBS.pop(user_id, None)
-
-        # Отдаём картинку пользователю
-        await message.answer_photo(BufferedInputFile(img_bytes, filename="image.png"))
-
-        # --- LOG: photo_result success ---
-        log_user_event(
-            ts=int(time.time()),
-            user_id=user_id,
-            chat_id=int(message.chat.id) if message.chat else 0,
-            username=(message.from_user.username or ""),
-            first_name=(message.from_user.first_name or ""),
-            event_type="photo_result",
-            mode=mode,
-            message_id=int(message.message_id),
-            text_len=len(user_text),
-            photo_provider=(IMAGE_BACKEND_PROVIDER or ""),
-            photo_model=(OPENROUTER_IMAGE_MODEL if (IMAGE_BACKEND_PROVIDER or "").strip().lower() == "openrouter" else (OPENAI_IMAGE_MODEL if (IMAGE_BACKEND_PROVIDER or "").strip().lower() == "openai" else "")),
-            ok=1,
-            note="success",
-        )
-
-
-        # Кулдаун на следующее фото
-        upsert_photo_gate(
-            user_id=user_id,
-            score=photo_gate["score"],
-            attempts=photo_gate["attempts"],
-            last_ask_ts=now,
-            cooldown_until_ts=photo_gate["cooldown_until_ts"],
-            awaiting_context=photo_gate["awaiting_context"],
-            context_asked_ts=photo_gate["context_asked_ts"],
-            awaiting_image_prompt=0,
-            image_cooldown_until_ts=now + IMAGE_COOLDOWN_SEC,
-        )
+    image_runtime_hooks = ImageRuntimeHooks(
+        get_user_profile=get_user_profile,
+        upsert_photo_gate=upsert_photo_gate,
+        log_user_event=log_user_event,
+        image_analytics_context=_image_analytics_context,
+        generate_image_backend=generate_image_backend,
+    )
+    if await handle_awaiting_image_prompt(
+        bot=bot,
+        message=message,
+        user_id=user_id,
+        user_text=user_text,
+        now=now,
+        photo_gate=photo_gate,
+        image_cooldown_sec=IMAGE_COOLDOWN_SEC,
+        mode_to_image_style=MODE_TO_IMAGE_STYLE,
+        jobs=IMAGE_JOBS,
+        hooks=image_runtime_hooks,
+    ):
         return
     # --- /IMAGE GENERATION FLOW ---
 
 
-    audio_only = is_audio_request(user_text)
+    audio_only = is_audio_request_for_chat(user_text)
    
     profile = get_user_profile(user_id)
     mode = (profile.get("mode") or "basic").strip()
@@ -2599,8 +1461,6 @@ async def on_text(message: types.Message):
     append_history(user_id, mode, "user", user_text_for_history)
     history = get_history(user_id, mode)
 
-    memory_block = format_state_block(state)
-    
     if mode == "whore":
         rel_state = get_relationship_state(DB_PATH, user_id, mode)
         ghost_mood = check_ghosting(rel_state)
@@ -2616,95 +1476,13 @@ async def on_text(message: types.Message):
         if system_base is None:
             system_base = MODE_TO_SYSTEM_PROMPT["basic"]
 
-    base = AUDIO_SYSTEM_PROMPT if (audio_only and mode != "whore") else system_base
-
-    chef_addon = ""
-    if mode == "chef":
-        sub = (state.get("chef_submode") or "").strip()
-
-        if sub == "restaurant":
-            chef_addon = (
-                "\n\n[CHEF_SUBMODE=RESTAURANT]\n"
-                "РАБОТАЙ СТРОГО В ДВЕ ФАЗЫ.\n"
-                "КЛЮЧЕВОЕ ПРАВИЛО: СНАЧАЛА КОЛИЧЕСТВА, ПОТОМ ТЕХНИКА.\n\n"
-
-                "ФАЗА 1 — ПРОЕКТИРОВАНИЕ:\n"
-                "- Уточни количество порций.\n"
-                "- Уточни или предложи ТОЧНЫЕ КОЛИЧЕСТВА основных ингредиентов.\n"
-                "- ЯВНО пропиши объёмы: граммы, миллилитры, штуки.\n"
-                "- Перечисли дополнительные ингредиенты и специи С КОЛИЧЕСТВАМИ.\n"
-                "- НЕ ДАВАЙ рецепт, шаги или технику.\n"
-                "- Заверши вопросом подтверждения состава и количеств.\n\n"
-
-                "ФАЗА 2 — ИСПОЛНЕНИЕ (ПОСЛЕ ПОДТВЕРЖДЕНИЯ):\n"
-                "- Дай полный рецепт с объяснением техники.\n"
-                "- Все ингредиенты — с точными количествами.\n"
-                "- Укажи контроль готовности и подачу.\n\n"
-
-                "СТРОГО ЗАПРЕЩЕНО:\n"
-                "- Начинать готовку без фиксации количеств.\n"
-                "- Описывать блюдо без указания граммовок.\n"
-            )
-
-
-        else:
-            # default = home_fast
-            chef_addon = (
-                "\n\n[CHEF_SUBMODE=HOME_FAST]\n"
-                "РАБОТАЙ В ДВЕ ФАЗЫ.\n"
-                "КЛЮЧЕВОЕ ПРАВИЛО: СНАЧАЛА КОЛИЧЕСТВА, ПОТОМ РЕЦЕПТ.\n\n"
-
-                "ФАЗА 1 — БЫСТРОЕ ПРОЕКТИРОВАНИЕ:\n"
-                "- Уточни, НА СКОЛЬКО ПОРЦИЙ готовим.\n"
-                "- Уточни или предложи КОЛИЧЕСТВА основных ингредиентов (в граммах/штуках).\n"
-                "- Если пользователь не указал объёмы — предложи стандартные (например: 2 грудки = ~300 г).\n"
-                "- Чётко перечисли, что ЕЩЁ понадобится и в каком количестве.\n"
-                "- НЕ ДАВАЙ шаги готовки.\n"
-                "- Заверши вопросом подтверждения количеств.\n\n"
-
-                "ФАЗА 2 — БЫСТРОЕ ИСПОЛНЕНИЕ (ПОСЛЕ ПОДТВЕРЖДЕНИЯ):\n"
-                "- Дай короткий рецепт.\n"
-                "- Формат:\n"
-                "  • Ингредиенты с точными количествами\n"
-                "  • Шаги (до 6, по 1 строке)\n"
-                "  • Готово, когда (1 строка)\n\n"
-
-                "ЗАПРЕЩЕНО:\n"
-                "- Давать рецепт без указания количеств.\n"
-                "- Использовать формулировки «по вкусу» для базовых ингредиентов.\n"
-            )
-    style_addon = ""
-
-    rap_addon = ""
-    if mode == "oldschool_rep":
-        sub = (state.get("rap_submode") or "story").strip().lower()
-        if sub not in ("street", "story", "lyrical"):
-            sub = "story"
-
-        # Берём полноценный промпт подрежима из oldschool_rep.py
-        from src.prompts.oldschool_rep import RAP_SUBMODE_PROMPTS, RAP_SUBMODE_DEFAULT_BPM
-        
-        submode_prompt = RAP_SUBMODE_PROMPTS.get(sub, RAP_SUBMODE_PROMPTS["story"])
-        default_bpm = RAP_SUBMODE_DEFAULT_BPM.get(sub, 88)
-
-        rap_addon = f'''
-
-        {submode_prompt}
-
-        BPM по умолчанию: {default_bpm}
-        Если пользователь указал BPM явно — используй его.
-
-        ВАЖНО:
-        - Если пользователь указал "2 куплета" / "два куплета" — СРАЗУ пиши 2 куплета (без доп. вопросов).
-        - Не задавай уточняющих вопросов о формате, если формат уже выбран.
-        - Выводи только текст трека (без объяснений).
-
-        '''
-
-    style_addon = ""
-
-    system_prompt = base + memory_block + chef_addon + rap_addon + style_addon
-    messages = [{"role": "system", "content": system_prompt}] + history
+    system_prompt = build_chat_system_prompt(
+        mode=mode,
+        state=state,
+        base_prompt=system_base,
+        audio_only=audio_only,
+    )
+    messages = build_chat_messages(system_prompt=system_prompt, history=history)
 
 
     
@@ -2712,132 +1490,33 @@ async def on_text(message: types.Message):
     typing_task = asyncio.create_task(keep_typing(bot, message.chat.id, stop_event))
 
     try:
-        temperature = MODE_TO_TEMPERATURE.get(mode)
-
-        if temperature is None:
-            temperature = MODE_TO_TEMPERATURE["basic"]
-
-        temperature = float(temperature)
-
-        max_tokens = int(MODE_TO_MAX_TOKENS.get(mode, MODE_TO_MAX_TOKENS.get("basic", 600)))
-        freq_pen = float(MODE_TO_FREQUENCY_PENALTY.get(mode, MODE_TO_FREQUENCY_PENALTY.get("basic", 0.2)))
-        
-        # Переопределяем параметры только для unhinged-режима
-        if mode == "unhinged":
-            temperature = 1.3          # очень высокая — для дикого, непредсказуемого креатива
-            max_tokens = 1000           # чтобы хватило на длинные безумные истории
-            freq_pen = 0.0              # без наказания за повторы — даёт "маньячный" поток сознания
-        # аудио: короче и стабильнее (как у тебя было), но через конфиги
-        if audio_only and mode != "whore":
-            max_tokens = 120
-            temperature = min(temperature, 0.6)
-            freq_pen = max(freq_pen, 0.2)
-
-        # --- usage accumulator (tokens cost) ---
-        prompt_tokens_sum = 0
-        completion_tokens_sum = 0
-        total_tokens_sum = 0
-        tokens_source = ""
-
-        # 1) первый проход
-        reply_raw, finish_reason, usage = await call_openrouter_with_meta(
+        completion = await generate_chat_completion(
+            mode=mode,
             model=model,
             messages=messages,
-            temperature=temperature,
-            max_tokens=max_tokens,
-            frequency_penalty=freq_pen,
-            timeout_s=90.0,
+            call_openrouter_with_meta=call_openrouter_with_meta,
+            audio_only=audio_only,
         )
-
-        # accumulate usage from API (if present)
-        pt = int((usage or {}).get("prompt_tokens") or 0)
-        ct = int((usage or {}).get("completion_tokens") or 0)
-        tt = int((usage or {}).get("total_tokens") or 0)
-        prompt_tokens_sum += pt
-        completion_tokens_sum += ct
-        total_tokens_sum += tt
-        if tt > 0:
-            tokens_source = "api"
-
-
-        reply_raw = strip_internal_thoughts(reply_raw)
-        reply_raw = strip_scene_contract(reply_raw)
-
-
-        # 2) если похоже на обрыв — добираем продолжение "под капотом"
-        glued = reply_raw
-        cont_round = 0
-
-        while cont_round < MAX_AUTO_CONTINUATIONS and is_truncated_for_glue(glued, finish_reason):
-            cont_round += 1
-
-            cont_messages = (
-                messages
-                + [{"role": "assistant", "content": glued}]
-                + [{"role": "user", "content": _CONTINUE_PROMPT}]
-            )
-
-            cont_text, cont_finish, cont_usage = await call_openrouter_with_meta(
-                model=model,
-                messages=cont_messages,
-                temperature=temperature,
-                max_tokens=max(220, int(max_tokens * 0.7)),
-                frequency_penalty=freq_pen,
-                timeout_s=90.0,
-            )
-
-            # accumulate usage from API (if present)
-            pt = int((cont_usage or {}).get("prompt_tokens") or 0)
-            ct = int((cont_usage or {}).get("completion_tokens") or 0)
-            tt = int((cont_usage or {}).get("total_tokens") or 0)
-            prompt_tokens_sum += pt
-            completion_tokens_sum += ct
-            total_tokens_sum += tt
-            if tt > 0:
-                tokens_source = "api"
-
-
-            cont_text = strip_internal_thoughts(cont_text)
-            cont_text = strip_scene_contract(cont_text)
-
-            # если продолжение пустое — прекращаем
-            if not (cont_text or "").strip():
-                finish_reason = cont_finish
-                break
-
-            # склеиваем аккуратно (без дублей: добавим перевод строки)
-            glued = (glued.rstrip() + "\n" + cont_text.lstrip()).strip()
-            finish_reason = cont_finish
-
-        # 3) финальная пост-обработка только ПОСЛЕ склейки
-        reply = fix_truncated_reply(glued)
-        reply = strip_internal_thoughts(reply)
-        reply = strip_scene_contract(reply)
-        reply = fix_truncated_reply(reply)
+        reply = completion.reply
 
         # --- FINAL GUARD: prevent silent "empty reply" ---
         if not (reply or "").strip():
             logging.warning(
-                "EMPTY FINAL REPLY: raw_len=%s glued_len=%s finish_reason=%r",
-                len((reply_raw or "")),
-                len((glued or "")),
-                finish_reason,
+                "EMPTY FINAL REPLY: mode=%s model=%s",
+                mode,
+                model,
             )
             # fallback: try to show something useful instead of silence
-            fallback = (reply_raw or "").strip() or "Пустой ответ от модели. Переформулируй запрос одной фразой."
+            fallback = "Пустой ответ от модели. Переформулируй запрос одной фразой."
             await message.answer(fallback)
             stop_event.set()
             await typing_task
             return
 
-
-        # If API didn't return usage, estimate tokens as fallback
-        if total_tokens_sum <= 0:
-            # для денег тебе важнее output, но можно и input оценить отдельно
-            completion_tokens_sum = estimate_tokens(reply, model=model)
-            prompt_tokens_sum = 0
-            total_tokens_sum = completion_tokens_sum
-            tokens_source = "tiktoken" if completion_tokens_sum > 0 else ""
+        prompt_tokens_sum = completion.prompt_tokens
+        completion_tokens_sum = completion.completion_tokens
+        total_tokens_sum = completion.total_tokens
+        tokens_source = completion.tokens_source
 
 
     except Exception as e:
@@ -2890,7 +1569,7 @@ async def on_text(message: types.Message):
     )
 
     # --- GAME OVER lock ---
-    clean, triggered = strip_game_over_markers(reply)
+    clean, triggered = strip_chat_game_over_markers(reply)
 
     if triggered:
         lock_mode(user_id, mode, reason="GAME OVER")  # внутренний флаг, не показываем юзеру
@@ -2918,24 +1597,7 @@ async def on_text(message: types.Message):
 
     # --- обновляем сюжетную память (MVP-обновление без второго вызова) ---
     try:
-        # эпизод растёт каждый ход
-        state["episode"] = int(state.get("episode", 1)) + 1
-
-        # простой recap: 1-2 предложения из ответа (обрежем по длине)
-        recap = reply.strip().replace("\n", " ")
-        if len(recap) > 240:
-            recap = recap[:240].rsplit(" ", 1)[0] + "…"
-        state["recap"] = recap
-
-        # timeline: добавим короткий пункт по ходу пользователя
-        tl = state.get("timeline") or []
-        user_line = user_text.strip().replace("\n", " ")
-        if len(user_line) > 140:
-            user_line = user_line[:140].rsplit(" ", 1)[0] + "…"
-        tl.append(f"Ход: {user_line}")
-        # ограничим размер
-        state["timeline"] = tl[-40:]
-
+        state = update_story_state(state=state, user_text=user_text, reply=reply)
         save_mode_state(user_id, mode, state)
     except Exception:
         logging.exception("Failed to update mode_state (user_id=%s mode=%s)", user_id, mode)
@@ -2976,34 +1638,7 @@ async def on_set_model_callback(callback: types.CallbackQuery):
 
 @dp.callback_query(F.data == "imgcancel")
 async def cb_imgcancel(callback: types.CallbackQuery):
-    user_id = callback.from_user.id
-    job = IMAGE_JOBS.get(user_id)
-
-    if not job:
-        await callback.answer("Нечего отменять", show_alert=False)
-        return
-
-    # ставим флаг отмены
-    cancel_event: asyncio.Event = job["cancel_event"]
-    cancel_event.set()
-
-    status_task: asyncio.Task | None = job.get("status_task")
-    if status_task and not status_task.done():
-        status_task.cancel()
-
-
-    # пытаемся отменить задачу генерации (если жива)
-    gen_task: asyncio.Task | None = job.get("gen_task")
-    if gen_task and not gen_task.done():
-        gen_task.cancel()
-
-    # обновим статус-сообщение
-    try:
-        await callback.message.edit_text("⛔ Ок, отменил генерацию.", reply_markup=None)
-    except Exception:
-        pass
-
-    await callback.answer("Отменено")
+    await handle_image_cancel_callback(callback, IMAGE_JOBS)
 
 
 async def main():

@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import json
 import sqlite3
 import time
 from dataclasses import dataclass
@@ -36,6 +35,9 @@ def migrate_database(db_path: str, *, include_relationship_state: bool = False) 
         if current_version < 3:
             _migration_003_repository_state(conn, context)
             _set_schema_version(conn, 3)
+
+        if context.include_relationship_state:
+            _ensure_relationship_state_at_schema_head(conn)
 
         conn.commit()
     finally:
@@ -90,6 +92,53 @@ def _table_exists(conn: sqlite3.Connection, table_name: str) -> bool:
 def _add_column_if_missing(conn: sqlite3.Connection, table_name: str, column_name: str, ddl: str) -> None:
     if column_name not in _table_columns(conn, table_name):
         conn.execute(f"ALTER TABLE {table_name} ADD COLUMN {column_name} {ddl}")
+
+
+def _ensure_relationship_state_at_schema_head(conn: sqlite3.Connection) -> None:
+    conn.execute(
+        """
+        CREATE TABLE IF NOT EXISTS relationship_state (
+          user_id INTEGER NOT NULL,
+          mode TEXT NOT NULL,
+          state_json TEXT NOT NULL,
+          updated_at INTEGER NOT NULL,
+          conversation_ref TEXT,
+          PRIMARY KEY (user_id, mode)
+        )
+        """
+    )
+    _add_column_if_missing(conn, "relationship_state", "conversation_ref", "TEXT")
+    conn.execute(
+        "CREATE INDEX IF NOT EXISTS idx_relationship_state_conversation_ref ON relationship_state(conversation_ref)"
+    )
+    conn.execute(
+        """
+        CREATE TABLE IF NOT EXISTS conversation_relationship_state (
+          user_id INTEGER NOT NULL,
+          conversation_ref TEXT NOT NULL,
+          mode TEXT NOT NULL,
+          state_json TEXT NOT NULL,
+          updated_at INTEGER NOT NULL,
+          PRIMARY KEY (user_id, conversation_ref, mode)
+        )
+        """
+    )
+    conn.execute(
+        """
+        INSERT INTO conversation_relationship_state(user_id, conversation_ref, mode, state_json, updated_at)
+        SELECT
+          user_id,
+          COALESCE(conversation_ref, 'legacy-user-' || user_id || '-default'),
+          mode,
+          state_json,
+          updated_at
+        FROM relationship_state
+        WHERE 1 = 1
+        ON CONFLICT(user_id, conversation_ref, mode) DO UPDATE SET
+          state_json = excluded.state_json,
+          updated_at = excluded.updated_at
+        """
+    )
 
 
 def _migration_001_legacy_schema(conn: sqlite3.Connection, context: MigrationContext) -> None:

@@ -4,6 +4,8 @@
 
 Add the Python HTTP adapter under `src/adapters/http/**` so the Railway backend becomes the single owner of Mini App API surface and session exchange.
 
+This API must be designed as a reusable backend surface for Mini App first and future standalone web client second, without duplicating business logic in another stack.
+
 ## In Scope
 
 - introduce FastAPI-based HTTP adapter structure
@@ -13,6 +15,7 @@ Add the Python HTTP adapter under `src/adapters/http/**` so the Railway backend 
 - implement opaque session token issuance, lookup, expiry, and `401` re-auth contract
 - add HTTP security defaults: CORS allowlist, rate limiting, no raw init-data logging
 - define Railway service startup/readiness integration points
+- keep auth/session and job/media endpoints extensible so a future web auth/client layer can be added without rewriting core services
 
 ## Out of Scope
 
@@ -41,5 +44,6 @@ Add the Python HTTP adapter under `src/adapters/http/**` so the Railway backend 
 
 - Railway backend owns all documented `GET /api/*`
 - no business logic is moved into Vercel/frontend scope
+- HTTP adapter remains channel-neutral enough to serve future standalone web client needs
 - session contract is implemented and test-covered
 - HTTP adapter does not force the Postgres migration into the same PR

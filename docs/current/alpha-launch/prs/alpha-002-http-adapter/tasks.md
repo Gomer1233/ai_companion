@@ -7,5 +7,7 @@
 - [ ] Implement `GET /healthz` and `GET /readyz`.
 - [ ] Add CORS/origin allowlist and rate limiting defaults.
 - [ ] Ensure raw init data is not logged.
+- [ ] Keep endpoint contracts channel-neutral so they can later serve a standalone web client.
+- [ ] Keep session/auth composition extensible so Telegram init-data auth is not the only future-compatible entry path.
 - [ ] Add HTTP adapter tests for auth/session/readiness behavior.
 - [ ] Update `docs/current/alpha-launch/status.md` when PR starts and when it finishes.

@@ -19,3 +19,7 @@
 - Each PR must point back to `execution-plan.md`.
 - Each PR must have both `brief.md` and `tasks.md`.
 - Status values should stay simple: `Ready`, `Planned`, `In Progress`, `Blocked`, `Done`.
+
+## Notes
+
+- HTTP/API decisions should preserve a future standalone web client path without moving backend truth out of Railway.

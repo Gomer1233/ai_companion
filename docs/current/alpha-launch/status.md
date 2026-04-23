@@ -17,7 +17,7 @@
 
 - `multichannel-core` remains the completed foundation initiative and should not be overwritten to carry alpha launch planning.
 - Alpha launch planning now lives under `docs/current/alpha-launch/`.
-- `src/main.py` still needs service extraction and launcher thinning before HTTP, Postgres, and Mini App work should proceed.
+- `src/main.py` still needs service extraction and launcher thinning before HTTP, Postgres, Mini App, and any future standalone web client work should proceed cleanly.
 
 ## Completed
 
@@ -27,14 +27,35 @@
 - ALPHA-001 started with shared runtime helper extraction out of `src/main.py` and `src/core/legacy_runtime.py`
 - `src/main.py` history, photo gate, mode state, and mode lock wrappers now route through `SQLiteRepositories` instead of ad hoc launcher SQL
 - mode switch and reset flows in `src/main.py` now use repository-backed conversation reset/active-mode paths, with legacy relationship cleanup left as an explicit hook
+- remaining launcher profile/settings/chat-lock helpers in `src/main.py` now route through `SQLiteRepositories`; direct SQLite usage is down to bootstrap/event logging paths
+- runtime event logging in `src/main.py` now routes through `SQLiteRepositories` instead of ad hoc launcher SQL
+- image provider selection, prompt translation, and backend generation now live in `src/core/image_service.py` instead of `src/main.py`
+- Telegram-side image job registry, status loop, cancel callback, and awaiting-image-prompt handler now live in `src/adapters/telegram/image_runtime.py` instead of `src/main.py`
+- chat prompt assembly, OpenRouter continuation glue, game-over marker stripping, audio intent detection, and story-state update now live in `src/core/chat_service.py` instead of `src/main.py`
+- reset side effects and reset audit logging now live in `src/core/reset_service.py` instead of `src/main.py`
+- mode switch, mode-picked state, and chef/rap submode persistence now live in `src/core/conversation_service.py` instead of ad hoc launcher calls
+- `src/core/legacy_runtime.py` is now a thin compatibility shell over `src/core/runtime_helpers.py` and no longer owns active runtime handler logic
+- DB bootstrap now lives in `src/db/bootstrap.py`; `src/main.py` keeps only a thin `init_db()` wrapper and no longer owns direct `sqlite3.connect` or schema helpers
+- PR review fixes restored audio-only completion limits and made relationship-state schema head checks idempotent for databases already at schema version 3
+
+## Verification
+
+- `pytest` focused refactor suite passed: `51 passed`.
+- `ruff` ALPHA-001 scoped refactor slice passed after installing the local dev tooling.
+- limited `mypy` passed with the configured `pyproject.toml` scope: `Success: no issues found in 23 source files`.
+- focused pytest rerun after tooling fixes passed: `25 passed`.
+- full pytest suite passed after PR review fixes: `61 passed`.
+- chat-service ruff slice passed after PR review fixes.
+- Full-repo `ruff check .` still reports legacy lint debt in files outside ALPHA-001 scope, including prompts, migration tests, utility scripts, and remaining `src/main.py` launcher code.
 
 ## Next Step
 
-Continue `ALPHA-001 Finish Refactor + Boundaries` by addressing the remaining launcher-owned profile/settings helpers and extracting more orchestration out of `src/main.py`.
+Commit and push the final ALPHA-001 tooling verification slice, then move to `ALPHA-002 FastAPI HTTP Adapter on Railway`.
 
 ## Risks / Notes
 
 - The alpha release path depends on finishing launcher cleanup before introducing a second transport surface.
 - Explicit launch scope is intentionally conservative on capability surface, but persona scope remains subject to audit freeze.
 - Security baseline assumes no direct browser path to Supabase in alpha v1.
+- Backend boundaries should avoid Telegram-only assumptions because a future standalone web client is expected after alpha.
 

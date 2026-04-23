@@ -226,3 +226,41 @@ def test_reset_user_all_clears_all_conversation_state_and_appends_events(tmp_pat
         assert conn.execute("SELECT COUNT(*) FROM user_events WHERE user_id=106").fetchone()[0] == 1
     finally:
         conn.close()
+
+
+def test_profile_settings_and_chat_helpers_roundtrip(tmp_path) -> None:
+    _, repo = _make_repo(tmp_path)
+    user_ref = UserRef("107")
+    conv = repo.ensure_default_conversation(user_ref, active_mode="basic")
+
+    assert repo.get_user_profile(user_ref)["mode"] == ""
+    assert repo.get_user_model(user_ref, default_model="openai/gpt-4o-mini") == "openai/gpt-4o-mini"
+
+    repo.set_user_profile(
+        user_ref,
+        preferred_name="Andrey",
+        preferred_title="boss",
+        mode="chef",
+    )
+    repo.set_mode_picked(user_ref, True)
+    repo.lock_chat(user_ref, "maintenance")
+    repo.set_user_model(user_ref, "x-ai/grok-4.1-fast")
+    repo.append_history(user_ref, conv.conversation_ref, "chef", "user", "one")
+    repo.append_history(user_ref, conv.conversation_ref, "basic", "assistant", "two")
+
+    profile = repo.get_user_profile(user_ref)
+    assert profile == {
+        "preferred_name": "Andrey",
+        "preferred_title": "boss",
+        "mode": "chef",
+        "mode_picked": "1",
+        "chat_locked": "1",
+        "lock_reason": "maintenance",
+    }
+    assert repo.get_user_model(user_ref, default_model="openai/gpt-4o-mini") == "x-ai/grok-4.1-fast"
+    assert repo.get_active_dialog_stats(user_ref) == {"basic": 1, "chef": 1}
+
+    repo.unlock_chat(user_ref)
+    unlocked = repo.get_user_profile(user_ref)
+    assert unlocked["chat_locked"] == "0"
+    assert unlocked["lock_reason"] == ""
