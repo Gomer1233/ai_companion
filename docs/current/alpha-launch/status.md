@@ -35,11 +35,11 @@
 - reset side effects and reset audit logging now live in `src/core/reset_service.py` instead of `src/main.py`
 - mode switch, mode-picked state, and chef/rap submode persistence now live in `src/core/conversation_service.py` instead of ad hoc launcher calls
 - `src/core/legacy_runtime.py` is now a thin compatibility shell over `src/core/runtime_helpers.py` and no longer owns active runtime handler logic
-- `init_db()` now runs the shared SQLite migration path before legacy bootstrap helpers, so repository-backed conversation tables exist during launcher startup
+- DB bootstrap now lives in `src/db/bootstrap.py`; `src/main.py` keeps only a thin `init_db()` wrapper and no longer owns direct `sqlite3.connect` or schema helpers
 
 ## Next Step
 
-Continue `ALPHA-001 Finish Refactor + Boundaries` by reducing remaining Telegram UI-heavy mode branching and deciding bootstrap `init_db()` placement.
+Finish `ALPHA-001` by running final focused verification and deciding whether the remaining Telegram UI-heavy mode branching is acceptable launcher/adapter scope for this PR.
 
 ## Risks / Notes
 

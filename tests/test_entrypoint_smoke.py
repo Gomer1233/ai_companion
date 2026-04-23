@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import inspect
 import sqlite3
 from unittest.mock import AsyncMock
 
@@ -58,3 +59,13 @@ def test_init_db_is_idempotent_and_creates_llm_index(module_loader):
     module.init_db()
 
     assert index_exists(module.DB_PATH, "idx_user_events_llm")
+
+
+def test_main_launcher_does_not_own_sqlite_schema_bootstrap(module_loader):
+    module = module_loader("src.main")
+    source = inspect.getsource(module)
+
+    assert "sqlite3.connect" not in source
+    assert "ensure_user_profile_schema" not in source
+    assert "ensure_photo_gate_schema" not in source
+    assert "ensure_user_events_schema" not in source

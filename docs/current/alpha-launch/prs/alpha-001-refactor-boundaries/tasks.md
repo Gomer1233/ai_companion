@@ -4,9 +4,9 @@
 - [x] Move launcher state persistence wrappers behind `src/db/repositories.py`.
 - [x] Move mode switch, reset, and runtime analytics/event logging paths off ad hoc launcher SQL.
 - [x] Inventory the remaining `src/main.py` responsibility buckets and explicitly track what still owns orchestration there.
-- [ ] Extract remaining orchestration from `src/main.py` into service modules.
-  Current progress: image provider selection, prompt translation, and backend generation moved to `src/core/image_service.py`; Telegram-side image job runtime moved to `src/adapters/telegram/image_runtime.py`; chat prompt assembly, completion glue, and story-state update moved to `src/core/chat_service.py`; reset orchestration moved to `src/core/reset_service.py`; mode switch and submode persistence moved to `src/core/conversation_service.py`; remaining launcher-owned work is now mostly Telegram UI-heavy mode branching and bootstrap debt.
-- [ ] Decide whether `init_db()` bootstrap stays in launcher or moves behind bootstrap/adapters.
+- [x] Extract remaining orchestration from `src/main.py` into service modules.
+  Current progress: image provider selection, prompt translation, and backend generation moved to `src/core/image_service.py`; Telegram-side image job runtime moved to `src/adapters/telegram/image_runtime.py`; chat prompt assembly, completion glue, and story-state update moved to `src/core/chat_service.py`; reset orchestration moved to `src/core/reset_service.py`; mode switch and submode persistence moved to `src/core/conversation_service.py`; DB bootstrap moved to `src/db/bootstrap.py`. Remaining `src/main.py` work is now Telegram UI-heavy branching and launcher wiring, which is acceptable scope for this PR.
+- [x] Decide whether `init_db()` bootstrap stays in launcher or moves behind bootstrap/adapters.
 - [x] Remove or neutralize `src/core/legacy_runtime.py`.
 - [ ] Keep Telegram adapter code free of product rules.
 - [ ] Keep core/service boundaries free of `aiogram` types.
