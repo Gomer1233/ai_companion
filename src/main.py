@@ -12,9 +12,7 @@ import re
 import time
 import asyncio
 import logging
-import base64
 import random
-import json
 from typing import Any, Dict, List
 from src.config.modes import (
     MODE_TO_SYSTEM_PROMPT,
@@ -39,7 +37,6 @@ from src.adapters.telegram.image_runtime import (
 )
 
 from src.prompts.relationship import (
-    ensure_relationship_table,
     get_relationship_state,
     save_relationship_state,
     reset_relationship_state,
@@ -52,10 +49,7 @@ from src.app.settings import Settings
 from src.core.runtime_helpers import (
     call_openrouter_with_meta as shared_call_openrouter_with_meta,
     chunk_text,
-    extract_json_object,
     keep_typing,
-    strip_internal_thoughts,
-    strip_scene_contract,
 )
 from src.core.chat_service import (
     build_chat_messages,
@@ -278,6 +272,23 @@ DUST_TTL_MAX = 30
 
 def _clamp(v: int, lo: int, hi: int) -> int:
     return lo if v < lo else hi if v > hi else v
+
+
+def dust_spawn(field: dict, count: int) -> None:
+    rnd = random.Random(field["rnd_seed"] ^ ((field["tick"] + 17) * 2654435761))
+    available = max(0, DUST_MAX_PARTICLES - len(field["particles"]))
+    for _ in range(min(count, available)):
+        field["particles"].append(
+            {
+                "x": rnd.randint(0, DUST_W - 1),
+                "y": rnd.randint(0, DUST_H - 1),
+                "dx": rnd.choice([-1, 0, 1]),
+                "dy": rnd.choice([-1, 0, 1]),
+                "ttl": rnd.randint(DUST_TTL_MIN, DUST_TTL_MAX),
+                "ch": rnd.choice(DUST_PARTICLE_CHARS),
+            }
+        )
+
 
 def dust_step(field: dict) -> None:
     field["tick"] += 1
@@ -1087,6 +1098,19 @@ def build_rap_submode_keyboard(current: str | None = None) -> InlineKeyboardMark
         ],
         [InlineKeyboardButton(text="?? ????????? ????????", callback_data="remindctx")],
     ]
+    return InlineKeyboardMarkup(inline_keyboard=rows)
+
+
+def build_modes_keyboard(user_id: int, current_mode: str | None = None) -> InlineKeyboardMarkup:
+    rows: list[list[InlineKeyboardButton]] = []
+    current = (current_mode or "").strip()
+    stats = get_active_dialog_stats(user_id)
+
+    for title, mode in MODE_CATALOG:
+        marker = " ✓" if mode == current else ""
+        prefix = "↩️ " if stats.get(mode, 0) else "🆕 "
+        rows.append([InlineKeyboardButton(text=f"{prefix}{title}{marker}", callback_data=f"setmode:{mode}")])
+
     return InlineKeyboardMarkup(inline_keyboard=rows)
 
 
