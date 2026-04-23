@@ -231,7 +231,11 @@ async def generate_chat_completion(
 
     while cont_round < MAX_AUTO_CONTINUATIONS and is_truncated_for_glue(glued, finish_reason):
         cont_round += 1
-        cont_messages = messages + [{"role": "assistant", "content": glued}] + [{"role": "user", "content": CONTINUE_PROMPT}]
+        cont_messages = [
+            *messages,
+            {"role": "assistant", "content": glued},
+            {"role": "user", "content": CONTINUE_PROMPT},
+        ]
         cont_text, cont_finish, cont_usage = await call_openrouter_with_meta(
             model=model,
             messages=cont_messages,

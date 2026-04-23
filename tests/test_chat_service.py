@@ -18,15 +18,23 @@ def test_is_audio_request_matches_expected_phrases() -> None:
 
 
 def test_build_system_prompt_includes_state_and_mode_addons() -> None:
+    story_state = {
+        "premise": "cook",
+        "cast": [],
+        "timeline": [],
+        "open_threads": [],
+        "episode": 1,
+        "season": 1,
+    }
     chef_prompt = build_system_prompt(
         mode="chef",
-        state={"chef_submode": "restaurant", "premise": "cook", "cast": [], "timeline": [], "open_threads": [], "episode": 1, "season": 1},
+        state={"chef_submode": "restaurant", **story_state},
         base_prompt="BASE",
         audio_only=False,
     )
     rap_prompt = build_system_prompt(
         mode="oldschool_rep",
-        state={"rap_submode": "story", "premise": "rap", "cast": [], "timeline": [], "open_threads": [], "episode": 1, "season": 1},
+        state={"rap_submode": "story", **story_state, "premise": "rap"},
         base_prompt="BASE",
         audio_only=False,
     )

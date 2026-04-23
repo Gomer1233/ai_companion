@@ -282,8 +282,10 @@ class ImageService:
                     if url_out:
                         image_response = await client.get(url_out)
                         if image_response.status_code >= 400:
+                            response_preview = (image_response.text or "")[:200]
                             raise RuntimeError(
-                                f"Failed to download image URL {url_out}: HTTP {image_response.status_code}: {(image_response.text or '')[:200]}"
+                                f"Failed to download image URL {url_out}: "
+                                f"HTTP {image_response.status_code}: {response_preview}"
                             )
                         return image_response.content
                     raise RuntimeError(f"No b64_json or url in Together response: {json.dumps(data)[:900]}")

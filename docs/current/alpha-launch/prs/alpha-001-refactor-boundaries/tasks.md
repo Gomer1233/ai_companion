@@ -13,8 +13,8 @@
 - [x] Ensure conversation/image/reset/access flows operate on domain inputs, not Telegram message objects.
 - [x] Add or update service-level tests for extracted logic.
 - [x] Run `pytest` on the touched refactor slices.
-- [ ] Run `ruff`.
-  Blocked in current environment: `python -m ruff` reports `No module named ruff`.
-- [ ] Run limited `mypy` on extracted code.
-  Blocked in current environment: `python -m mypy` reports `No module named mypy`.
+- [x] Run `ruff`.
+  Scoped ALPHA-001 refactor slice passed. Full-repo `ruff check .` still reports legacy cleanup outside this PR scope.
+- [x] Run limited `mypy` on extracted code.
+  Passed with configured `pyproject.toml` scope.
 - [x] Update `docs/current/alpha-launch/status.md` as refactor progress changes.

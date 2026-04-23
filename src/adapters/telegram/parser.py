@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from aiogram import types
 
-from src.core.contracts import ConversationRef, InboundEvent, InboundEventType, UserRef
+from src.core.contracts import InboundEvent, InboundEventType, UserRef
 
 
 def telegram_user_ref(user_id: int) -> UserRef:
@@ -17,6 +17,18 @@ def resolve_conversation_for_user(repositories, user_id: int):
     return repositories.ensure_default_conversation(user_ref)
 
 
+def _message_user_id(message: types.Message) -> int:
+    if message.from_user is None:
+        raise ValueError("Telegram message event requires from_user")
+    return int(message.from_user.id)
+
+
+def _callback_data(callback: types.CallbackQuery) -> str:
+    if not callback.data:
+        raise ValueError("Telegram callback event requires callback data")
+    return callback.data
+
+
 def parse_message_event(
     message: types.Message,
     repositories,
@@ -27,8 +39,9 @@ def parse_message_event(
     job_id: str | None = None,
     payload: dict | None = None,
 ) -> InboundEvent:
-    user_ref = telegram_user_ref(message.from_user.id)
-    conversation = resolve_conversation_for_user(repositories, message.from_user.id)
+    user_id = _message_user_id(message)
+    user_ref = telegram_user_ref(user_id)
+    conversation = resolve_conversation_for_user(repositories, user_id)
     resolved_text = text if text is not None else (message.text or None)
     return InboundEvent(
         event_type=event_type,
@@ -95,13 +108,14 @@ def parse_reset_mode_callback_event(callback: types.CallbackQuery, repositories,
 
 
 def parse_switch_mode_callback_event(callback: types.CallbackQuery, repositories) -> InboundEvent:
-    mode = callback.data.split(':', 1)[1].strip()
+    callback_data = _callback_data(callback)
+    mode = callback_data.split(":", 1)[1].strip()
     return parse_callback_event(
         callback,
         repositories,
         event_type=InboundEventType.SWITCH_MODE,
         mode=mode,
-        payload={'callback_data': callback.data},
+        payload={"callback_data": callback_data},
     )
 
 

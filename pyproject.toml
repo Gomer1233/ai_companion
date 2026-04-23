@@ -1,6 +1,14 @@
 [tool.ruff]
 target-version = "py311"
 line-length = 120
+exclude = [
+  ".local",
+  "archive",
+  "docs/archive",
+  "src/Photo",
+  "src/config/Архив конфигов",
+  "Архив ботов",
+]
 
 [tool.ruff.lint]
 select = [

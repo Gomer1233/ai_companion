@@ -10,7 +10,6 @@ from typing import Any, Awaitable, Callable, Mapping
 from aiogram import Bot
 from aiogram.types import BufferedInputFile, InlineKeyboardButton, InlineKeyboardMarkup
 
-
 IMAGE_FUN_PHRASES = [
     "Анализирую композицию…",
     "Ищу лучшую позу для кадра…",
@@ -36,7 +35,7 @@ DUST_FADE_CHARS = ["·", "⋅", "•", "✧"]
 class ImageJobHandle:
     cancel_event: asyncio.Event
     status_task: asyncio.Task[Any] | None = None
-    gen_task: asyncio.Task[Any] | None = None
+    gen_task: asyncio.Future[bytes] | None = None
 
 
 @dataclass(frozen=True)
@@ -215,7 +214,7 @@ async def handle_awaiting_image_prompt(
         ok=1,
     )
 
-    job.gen_task = asyncio.create_task(hooks.generate_image_backend(image_prompt))
+    job.gen_task = asyncio.ensure_future(hooks.generate_image_backend(image_prompt))
 
     try:
         img_bytes = await job.gen_task

@@ -40,12 +40,15 @@
 ## Verification
 
 - `pytest` focused refactor suite passed: `51 passed`.
-- `ruff` could not be executed because the current Python environment does not have `ruff` installed.
-- limited `mypy` could not be executed because the current Python environment does not have `mypy` installed.
+- `ruff` ALPHA-001 scoped refactor slice passed after installing the local dev tooling.
+- limited `mypy` passed with the configured `pyproject.toml` scope: `Success: no issues found in 23 source files`.
+- focused pytest rerun after tooling fixes passed: `25 passed`.
+- full pytest suite passed after tooling fixes: `59 passed`.
+- Full-repo `ruff check .` still reports legacy lint debt in files outside ALPHA-001 scope, including prompts, migration tests, utility scripts, and remaining `src/main.py` launcher code.
 
 ## Next Step
 
-Treat `ALPHA-001` as code-complete pending optional toolchain install for `ruff`/`mypy`, then push the branch and move to `ALPHA-002 FastAPI HTTP Adapter on Railway`.
+Commit and push the final ALPHA-001 tooling verification slice, then move to `ALPHA-002 FastAPI HTTP Adapter on Railway`.
 
 ## Risks / Notes
 
