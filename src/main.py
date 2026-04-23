@@ -67,6 +67,7 @@ from src.core.chat_service import (
     update_story_state,
 )
 from src.core.image_service import ImageService
+from src.core.reset_service import ResetAuditContext, ResetService
 from src.db.migrations import migrate_database
 from src.db.repositories import SQLiteRepositories, legacy_user_ref
 
@@ -649,6 +650,14 @@ def set_user_model(user_id: int, model: str) -> None:
 
 APP_SETTINGS = Settings.from_env(project_root=PROJECT_ROOT)
 IMAGE_SERVICE = ImageService(settings=APP_SETTINGS, openrouter_client=openrouter_client)
+RESET_SERVICE = ResetService(
+    repositories=DB_REPOSITORIES,
+    user_ref_factory=legacy_user_ref,
+    repo_refs=_repo_refs,
+    log_user_event=log_user_event,
+    reset_relationship_state=reset_relationship_state,
+    db_path=DB_PATH,
+)
 
 
 def _image_analytics_context() -> tuple[str, str]:
@@ -1072,28 +1081,18 @@ async def reset_btn(message: types.Message):
     await cmd_reset(message)
 
 async def _reset_current_mode(user_id: int, mode: str, *, note: str, chat_id: int, username: str, first_name: str, message_id: int, text_len: int) -> str:
-    now_ts = int(time.time())
-    log_user_event(
-        ts=now_ts,
-        user_id=user_id,
-        chat_id=chat_id,
-        username=username,
-        first_name=first_name,
-        event_type="reset",
-        mode=mode,
-        message_id=message_id,
-        text_len=text_len,
-        ok=1,
+    return RESET_SERVICE.reset_current_mode(
+        user_id,
+        mode,
         note=note,
+        audit=ResetAuditContext(
+            chat_id=chat_id,
+            username=username,
+            first_name=first_name,
+            message_id=message_id,
+            text_len=text_len,
+        ),
     )
-
-    user_ref, conversation_ref = _repo_refs(user_id)
-    DB_REPOSITORIES.reset_mode_in_conversation(user_ref, conversation_ref, mode)
-
-    if mode == "whore":
-        reset_relationship_state(DB_PATH, user_id, mode)
-
-    return mode
 
 
 @dp.message(F.text == "Сброс персонажа")
@@ -1558,29 +1557,19 @@ async def cmd_reset(message: types.Message):
     prev_profile = get_user_profile(user_id)
     prev_mode = (prev_profile.get("mode") or "basic").strip()
 
-    log_user_event(
-        ts=int(time.time()),
-        user_id=user_id,
-        chat_id=int(message.chat.id) if message.chat else 0,
-        username=(message.from_user.username or ""),
-        first_name=(message.from_user.first_name or ""),
-        event_type="reset",
-        mode="basic",
-        mode_from=prev_mode,
-        mode_to="basic",
-        message_id=int(message.message_id),
-        text_len=len((message.text or "")),
-        ok=1,
-        note="scope=all",
+    RESET_SERVICE.reset_user_all(
+        user_id,
+        prev_mode=prev_mode,
+        audit=ResetAuditContext(
+            chat_id=int(message.chat.id) if message.chat else 0,
+            username=(message.from_user.username or ""),
+            first_name=(message.from_user.first_name or ""),
+            message_id=int(message.message_id),
+            text_len=len((message.text or "")),
+        ),
     )
-
-    unlock_chat(user_id)
-    user_ref = legacy_user_ref(user_id)
-    DB_REPOSITORIES.reset_user_all(user_ref)
     set_mode_picked(user_id, False)
     IMAGE_JOBS.clear(user_id)
-
-    reset_relationship_state(DB_PATH, user_id, "whore")
 
     await message.answer(
         "\u0421\u0431\u0440\u043e\u0441 \u0441\u0434\u0435\u043b\u0430\u043b.\n"
