@@ -1471,6 +1471,7 @@ async def on_text(message: types.Message):
             model=model,
             messages=messages,
             call_openrouter_with_meta=call_openrouter_with_meta,
+            audio_only=audio_only,
         )
         reply = completion.reply
 

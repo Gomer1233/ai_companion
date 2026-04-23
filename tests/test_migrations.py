@@ -53,6 +53,37 @@ def test_fresh_database_migrates_to_head(tmp_path):
         conn.close()
 
 
+def test_relationship_tables_are_ensured_when_schema_already_at_head(tmp_path):
+    db_path = tmp_path / "head_without_relationship.db"
+
+    migrate_database(str(db_path), include_relationship_state=False)
+    assert not _table_exists(db_path, "relationship_state")
+    assert not _table_exists(db_path, "conversation_relationship_state")
+
+    migrate_database(str(db_path), include_relationship_state=True)
+
+    assert _table_exists(db_path, "relationship_state")
+    assert _table_exists(db_path, "conversation_relationship_state")
+    assert "conversation_ref" in _column_names(db_path, "relationship_state")
+
+    conn = sqlite3.connect(db_path)
+    try:
+        conn.execute(
+            """
+            INSERT INTO relationship_state(user_id, mode, state_json, updated_at)
+            VALUES (1, 'whore', ?, 100)
+            """,
+            (json.dumps({"stage": "STRANGER"}),),
+        )
+        conn.commit()
+        row = conn.execute(
+            "SELECT state_json FROM relationship_state WHERE user_id=1 AND mode='whore'"
+        ).fetchone()
+        assert json.loads(row[0]) == {"stage": "STRANGER"}
+    finally:
+        conn.close()
+
+
 
 def test_legacy_database_backfills_default_conversation(tmp_path):
     db_path = tmp_path / "legacy.db"

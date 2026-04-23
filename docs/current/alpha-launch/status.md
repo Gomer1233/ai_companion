@@ -36,6 +36,7 @@
 - mode switch, mode-picked state, and chef/rap submode persistence now live in `src/core/conversation_service.py` instead of ad hoc launcher calls
 - `src/core/legacy_runtime.py` is now a thin compatibility shell over `src/core/runtime_helpers.py` and no longer owns active runtime handler logic
 - DB bootstrap now lives in `src/db/bootstrap.py`; `src/main.py` keeps only a thin `init_db()` wrapper and no longer owns direct `sqlite3.connect` or schema helpers
+- PR review fixes restored audio-only completion limits and made relationship-state schema head checks idempotent for databases already at schema version 3
 
 ## Verification
 
@@ -43,7 +44,8 @@
 - `ruff` ALPHA-001 scoped refactor slice passed after installing the local dev tooling.
 - limited `mypy` passed with the configured `pyproject.toml` scope: `Success: no issues found in 23 source files`.
 - focused pytest rerun after tooling fixes passed: `25 passed`.
-- full pytest suite passed after tooling fixes: `59 passed`.
+- full pytest suite passed after PR review fixes: `61 passed`.
+- chat-service ruff slice passed after PR review fixes.
 - Full-repo `ruff check .` still reports legacy lint debt in files outside ALPHA-001 scope, including prompts, migration tests, utility scripts, and remaining `src/main.py` launcher code.
 
 ## Next Step

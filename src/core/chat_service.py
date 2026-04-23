@@ -192,6 +192,7 @@ async def generate_chat_completion(
     model: str,
     messages: List[Dict[str, Any]],
     call_openrouter_with_meta: Callable[..., Awaitable[tuple[str, str, Dict[str, Any]]]],
+    audio_only: bool = False,
 ) -> ChatCompletionResult:
     temperature = float(MODE_TO_TEMPERATURE.get(mode, MODE_TO_TEMPERATURE["basic"]))
     max_tokens = int(MODE_TO_MAX_TOKENS.get(mode, MODE_TO_MAX_TOKENS.get("basic", 600)))
@@ -201,6 +202,11 @@ async def generate_chat_completion(
         temperature = 1.3
         max_tokens = 1000
         freq_pen = 0.0
+
+    if audio_only and mode != "whore":
+        max_tokens = 120
+        temperature = min(temperature, 0.6)
+        freq_pen = max(freq_pen, 0.2)
 
     prompt_tokens_sum = 0
     completion_tokens_sum = 0

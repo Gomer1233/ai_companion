@@ -83,3 +83,24 @@ async def test_generate_chat_completion_glues_truncated_reply_and_falls_back_to_
     assert "continues and ends" in result.reply
     assert result.total_tokens > 0
     assert result.tokens_source == "tiktoken"
+
+
+@pytest.mark.asyncio
+async def test_generate_chat_completion_keeps_audio_caps() -> None:
+    calls: list[dict] = []
+
+    async def fake_call_openrouter_with_meta(**kwargs):
+        calls.append(kwargs)
+        return ("short voice reply", "stop", {"prompt_tokens": 1, "completion_tokens": 2, "total_tokens": 3})
+
+    await generate_chat_completion(
+        mode="basic",
+        model="model-1",
+        messages=build_chat_messages(system_prompt="sys", history=[{"role": "user", "content": "voice please"}]),
+        call_openrouter_with_meta=fake_call_openrouter_with_meta,
+        audio_only=True,
+    )
+
+    assert calls[0]["max_tokens"] == 120
+    assert calls[0]["temperature"] <= 0.6
+    assert calls[0]["frequency_penalty"] >= 0.2
