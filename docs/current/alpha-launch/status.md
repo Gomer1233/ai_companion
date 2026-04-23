@@ -33,11 +33,12 @@
 - Telegram-side image job registry, status loop, cancel callback, and awaiting-image-prompt handler now live in `src/adapters/telegram/image_runtime.py` instead of `src/main.py`
 - chat prompt assembly, OpenRouter continuation glue, game-over marker stripping, audio intent detection, and story-state update now live in `src/core/chat_service.py` instead of `src/main.py`
 - reset side effects and reset audit logging now live in `src/core/reset_service.py` instead of `src/main.py`
+- mode switch, mode-picked state, and chef/rap submode persistence now live in `src/core/conversation_service.py` instead of ad hoc launcher calls
 - `init_db()` now runs the shared SQLite migration path before legacy bootstrap helpers, so repository-backed conversation tables exist during launcher startup
 
 ## Next Step
 
-Continue `ALPHA-001 Finish Refactor + Boundaries` by extracting mode-switch and submode-selection orchestration out of `src/main.py`, while keeping bootstrap-only DB setup isolated.
+Continue `ALPHA-001 Finish Refactor + Boundaries` by reducing remaining Telegram UI-heavy mode branching, deciding bootstrap `init_db()` placement, and neutralizing remaining `legacy_runtime.py` active logic.
 
 ## Risks / Notes
 

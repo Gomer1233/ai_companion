@@ -66,6 +66,7 @@ from src.core.chat_service import (
     strip_game_over_markers as strip_chat_game_over_markers,
     update_story_state,
 )
+from src.core.conversation_service import ConversationService, ModeSwitchAuditContext
 from src.core.image_service import ImageService
 from src.core.reset_service import ResetAuditContext, ResetService
 from src.db.migrations import migrate_database
@@ -783,6 +784,16 @@ def default_mode_state(mode: str) -> Dict[str, Any]:
         "recap": "",
     }
 
+
+CONVERSATION_SERVICE = ConversationService(
+    repositories=DB_REPOSITORIES,
+    user_ref_factory=legacy_user_ref,
+    repo_refs=_repo_refs,
+    log_user_event=log_user_event,
+    default_mode_state=default_mode_state,
+)
+
+
 def build_context_reminder(user_id: int, mode: str, history_n: int = 8) -> str:
     """
     Универсальная "напоминалка контекста" для любого режима.
@@ -864,18 +875,11 @@ def remind_context_kb() -> InlineKeyboardMarkup:
 
 
 def get_mode_state(user_id: int, mode: str) -> Dict[str, Any]:
-    user_ref, conversation_ref = _repo_refs(user_id)
-    state = DB_REPOSITORIES.load_mode_state(user_ref, conversation_ref, mode)
-    if isinstance(state, dict):
-        return state
-    state = default_mode_state(mode)
-    DB_REPOSITORIES.save_mode_state(user_ref, conversation_ref, mode, state)
-    return state
+    return CONVERSATION_SERVICE.load_mode_state(user_id, mode)
 
 
 def save_mode_state(user_id: int, mode: str, state: Dict[str, Any]) -> None:
-    user_ref, conversation_ref = _repo_refs(user_id)
-    DB_REPOSITORIES.save_mode_state(user_ref, conversation_ref, mode, state)
+    CONVERSATION_SERVICE.save_mode_state(user_id, mode, state)
 
 # ----------------------------
 # OpenAI TTS (async)
@@ -1346,9 +1350,7 @@ async def cb_rapmode(callback: types.CallbackQuery):
         return
 
     # сохраняем выбор в mode_state для mode="oldschool_rep"
-    st = get_mode_state(user_id, "oldschool_rep")
-    st["rap_submode"] = picked
-    save_mode_state(user_id, "oldschool_rep", st)
+    CONVERSATION_SERVICE.set_rap_submode(user_id, picked)
 
     await callback.answer("Ок")
 
@@ -1398,26 +1400,16 @@ async def cb_setmode(callback: types.CallbackQuery):
         await callback.answer("Неизвестный режим", show_alert=True)
         return
 
-    # 1) сохраняем режим
-    user_ref, conversation_ref = _repo_refs(user_id)
-    DB_REPOSITORIES.set_active_mode(user_ref, conversation_ref, mode)
-    set_mode_picked(user_id, True)
-
-    # --- LOG: switch_mode ---
-    now_ts = int(time.time())
-    log_user_event(
-        ts=now_ts,
-        user_id=user_id,
-        chat_id=int(callback.message.chat.id) if callback.message and callback.message.chat else 0,
-        username=(callback.from_user.username or ""),
-        first_name=(callback.from_user.first_name or ""),
-        event_type="switch_mode",
-        mode=mode,              # новый текущий
-        mode_from=prev_mode,    # старый
-        mode_to=mode,           # новый
-        message_id=int(callback.message.message_id) if callback.message else 0,
-        text_len=0,
-        ok=1,
+    CONVERSATION_SERVICE.switch_mode(
+        user_id,
+        mode,
+        prev_mode=prev_mode,
+        audit=ModeSwitchAuditContext(
+            chat_id=int(callback.message.chat.id) if callback.message and callback.message.chat else 0,
+            username=(callback.from_user.username or ""),
+            first_name=(callback.from_user.first_name or ""),
+            message_id=int(callback.message.message_id) if callback.message else 0,
+        ),
     )
 
 
@@ -1469,8 +1461,7 @@ async def cb_setmode(callback: types.CallbackQuery):
         # если sub не выбран — дефолт story, но всё равно спросим (UX)
         if not sub:
             sub = "story"
-            st["rap_submode"] = sub
-            save_mode_state(user_id, "oldschool_rep", st)
+            st = CONVERSATION_SERVICE.ensure_rap_submode(user_id, sub)
 
         kb = build_rap_submode_keyboard(current=sub)
 
@@ -1528,9 +1519,7 @@ async def cb_chefmode(callback: types.CallbackQuery):
         return
 
     # сохраняем выбор в mode_state для mode="chef"
-    st = get_mode_state(user_id, "chef")
-    st["chef_submode"] = picked
-    save_mode_state(user_id, "chef", st)
+    CONVERSATION_SERVICE.set_chef_submode(user_id, picked)
 
     # короткое подтверждение
     label = "по-домашнему" if picked == "home" else "как в ресторане"
