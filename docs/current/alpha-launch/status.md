@@ -17,7 +17,8 @@
 
 - `multichannel-core` remains the completed foundation initiative and should not be overwritten to carry alpha launch planning.
 - Alpha launch planning now lives under `docs/current/alpha-launch/`.
-- `ALPHA-002 FastAPI HTTP Adapter` implementation is complete on the current branch and ready for PR publication/review.
+- `ALPHA-002 FastAPI HTTP Adapter` is merged to `main`.
+- `ALPHA-003 Postgres Backend + Cutover Runbook` is the next backlog item and is ready to start.
 
 ## Completed
 
@@ -27,6 +28,7 @@
 - ALPHA-001 started with shared runtime helper extraction out of `src/main.py` and `src/core/legacy_runtime.py`
 - `src/main.py` history, photo gate, mode state, and mode lock wrappers now route through `SQLiteRepositories` instead of ad hoc launcher SQL
 - mode switch and reset flows in `src/main.py` now use repository-backed conversation reset/active-mode paths, with legacy relationship cleanup left as an explicit hook
+- `ALPHA-001 Finish Refactor + Boundaries` is merged to `main`
 - `ALPHA-002` now adds:
   - HTTP runtime settings
   - SQLite-backed opaque sessions
@@ -34,10 +36,13 @@
   - `healthz`, `readyz`, `POST /api/session/telegram`, and protected `GET /api/*`
   - CORS allowlist, session exchange rate limiting, and launcher lifecycle integration
   - focused HTTP adapter tests plus passing full backend verification
+  - Telegram Mini App init-data HMAC validation on the backend before session issuance
+  - rejection of unsigned or tampered init-data payloads
+- `ALPHA-002 FastAPI HTTP Adapter` is merged to `main`
 
 ## Next Step
 
-Open and review the `ALPHA-002` PR, then move to the next alpha-launch backlog item after merge.
+Start `ALPHA-003 Postgres Backend + Cutover Runbook` from its existing `brief.md` and `tasks.md`, keeping the HTTP adapter contract unchanged while swapping the persistence backend.
 
 ## Risks / Notes
 

@@ -2,9 +2,9 @@
 
 | PR | Title | Depends On | Status | Brief |
 | --- | --- | --- | --- | --- |
-| ALPHA-001 | Finish Refactor + Boundaries | None | Ready | `prs/alpha-001-refactor-boundaries/brief.md` |
-| ALPHA-002 | FastAPI HTTP Adapter on Railway | ALPHA-001 | Planned | `prs/alpha-002-http-adapter/brief.md` |
-| ALPHA-003 | Postgres Backend + Cutover Runbook | ALPHA-002 | Planned | `prs/alpha-003-postgres-cutover/brief.md` |
+| ALPHA-001 | Finish Refactor + Boundaries | None | Done | `prs/alpha-001-refactor-boundaries/brief.md` |
+| ALPHA-002 | FastAPI HTTP Adapter on Railway | ALPHA-001 | Done | `prs/alpha-002-http-adapter/brief.md` |
+| ALPHA-003 | Postgres Backend + Cutover Runbook | ALPHA-002 | Ready | `prs/alpha-003-postgres-cutover/brief.md` |
 | ALPHA-004 | Provider Matrix + Explicit Policy Layer | ALPHA-003 | Planned | `prs/alpha-004-provider-matrix/brief.md` |
 | ALPHA-005 | Monetization Core + Admin Commands | ALPHA-004 | Planned | `prs/alpha-005-monetization-admin/brief.md` |
 | ALPHA-006 | Persona Audit + Launch Allowlist Freeze | ALPHA-005 | Planned | `prs/alpha-006-persona-audit/brief.md` |
