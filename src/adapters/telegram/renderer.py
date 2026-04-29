@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from collections.abc import Mapping
+
 from aiogram.types import BufferedInputFile
 from aiogram.types.input_file import FSInputFile
 
@@ -46,7 +48,7 @@ async def render_core_response(target, response: CoreResponse, *, reply_markup=N
             first_text = False
 
 
-def payload_to_text(payload: dict) -> str:
+def payload_to_text(payload: Mapping[str, object]) -> str:
     if not payload:
         return ''
     if 'text' in payload:

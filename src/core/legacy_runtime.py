@@ -1,28 +1,10 @@
 from __future__ import annotations
 
-import asyncio
-import json
-import logging
-import re
 import time
 from dataclasses import dataclass
-from typing import Any, Awaitable, Callable, Dict, List, Mapping
+from typing import Any, Awaitable, Callable, Dict, Mapping
 
-import httpx
-
-
-from src.core.runtime_helpers import (
-    call_openrouter_with_meta,
-    chunk_text,
-    estimate_tokens,
-    extract_json_object,
-    fix_truncated_reply,
-    is_truncated_for_glue,
-    keep_typing,
-    maybe_await,
-    strip_internal_thoughts,
-    strip_scene_contract,
-)
+from src.core.runtime_helpers import maybe_await
 
 
 @dataclass(slots=True)
@@ -44,7 +26,9 @@ class LegacySharedRuntime:
     build_modes_keyboard: Callable[[int, str | None], Any]
     mark_mode_picked: Callable[[int, str], None]
     remind_context_keyboard_factory: Callable[[], Any]
-    special_mode_switch_handler: Callable[[int, str, str, Any, Dict[str, Any], Any], Awaitable[bool] | bool] | None = None
+    special_mode_switch_handler: (
+        Callable[[int, str, str, Any, Dict[str, Any], Any], Awaitable[bool] | bool] | None
+    ) = None
     extra_reset_mode: Callable[[int, str], None] | None = None
     extra_reset_user_all: Callable[[int], None] | None = None
 
@@ -132,7 +116,7 @@ class LegacySharedRuntime:
         user_id = message.from_user.id
         profile = self.get_user_profile(user_id)
         current = profile.get("mode") or "basic"
-        keyboard = self.build_modes_keyboard(user_id, current_mode=current)
+        keyboard = self.build_modes_keyboard(user_id, current)
         await message.answer(
             f"\u0422\u0435\u043a\u0443\u0449\u0438\u0439 \u0440\u0435\u0436\u0438\u043c: `{current}`\n"
             "\u0412\u044b\u0431\u0435\u0440\u0438 \u0440\u0435\u0436\u0438\u043c \u043a\u043d\u043e\u043f\u043a\u043e\u0439 \u043d\u0438\u0436\u0435.\n\n"
