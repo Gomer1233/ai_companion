@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from aiogram import types
 
-from src.core.contracts import ConversationRef, InboundEvent, InboundEventType, UserRef
+from src.core.contracts import InboundEvent, InboundEventType, UserRef
 
 
 def telegram_user_ref(user_id: int) -> UserRef:
@@ -27,6 +27,8 @@ def parse_message_event(
     job_id: str | None = None,
     payload: dict | None = None,
 ) -> InboundEvent:
+    if message.from_user is None:
+        raise ValueError("message.from_user is required")
     user_ref = telegram_user_ref(message.from_user.id)
     conversation = resolve_conversation_for_user(repositories, message.from_user.id)
     resolved_text = text if text is not None else (message.text or None)
@@ -95,6 +97,8 @@ def parse_reset_mode_callback_event(callback: types.CallbackQuery, repositories,
 
 
 def parse_switch_mode_callback_event(callback: types.CallbackQuery, repositories) -> InboundEvent:
+    if callback.data is None:
+        raise ValueError("callback.data is required")
     mode = callback.data.split(':', 1)[1].strip()
     return parse_callback_event(
         callback,

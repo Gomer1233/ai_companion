@@ -8,7 +8,6 @@ from typing import Any
 
 from src.core.contracts import (
     AnalyticsEvent,
-    AnalyticsEventType,
     ConversationRecord,
     ConversationRef,
     ConversationStatus,

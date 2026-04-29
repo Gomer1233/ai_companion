@@ -19,6 +19,19 @@ def index_exists(db_path: str, index_name: str) -> bool:
         conn.close()
 
 
+def table_exists(db_path: str, table_name: str) -> bool:
+    conn = sqlite3.connect(db_path)
+    try:
+        cur = conn.cursor()
+        cur.execute(
+            "SELECT 1 FROM sqlite_master WHERE type='table' AND name=?",
+            (table_name,),
+        )
+        return cur.fetchone() is not None
+    finally:
+        conn.close()
+
+
 @pytest.mark.asyncio
 async def test_main_startup_runs(module_loader):
     module = module_loader("src.main")
@@ -58,3 +71,11 @@ def test_init_db_is_idempotent_and_creates_llm_index(module_loader):
     module.init_db()
 
     assert index_exists(module.DB_PATH, "idx_user_events_llm")
+
+
+def test_init_db_creates_conversation_schema(module_loader):
+    module = module_loader("src.main")
+
+    module.init_db()
+
+    assert table_exists(module.DB_PATH, "conversations")

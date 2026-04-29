@@ -36,9 +36,7 @@ from aiogram.types import ReplyKeyboardMarkup, KeyboardButton
 from aiogram.types import BufferedInputFile
 from aiogram.types.input_file import FSInputFile
 
-from src.prompts.oldschool_rep import RAP_SUBMODE_PROMPTS, RAP_SUBMODE_DEFAULT_BPM
 from src.prompts.relationship import (
-    ensure_relationship_table,
     get_relationship_state,
     save_relationship_state,
     reset_relationship_state,
@@ -51,13 +49,12 @@ from src.core.runtime_helpers import (
     call_openrouter_with_meta as shared_call_openrouter_with_meta,
     chunk_text,
     estimate_tokens,
-    extract_json_object,
     fix_truncated_reply,
     is_truncated_for_glue,
     keep_typing,
     strip_internal_thoughts,
-    strip_scene_contract,
 )
+from src.db.migrations import migrate_database
 from src.db.repositories import SQLiteRepositories, legacy_user_ref
 
 # ----------------------------
@@ -267,6 +264,23 @@ DUST_TTL_MAX = 30
 
 def _clamp(v: int, lo: int, hi: int) -> int:
     return lo if v < lo else hi if v > hi else v
+
+
+def dust_spawn(field: dict, count: int) -> None:
+    rnd = random.Random(field["rnd_seed"] ^ ((field["tick"] + 17) * 2654435761))
+    available = max(0, DUST_MAX_PARTICLES - len(field["particles"]))
+    for _ in range(min(count, available)):
+        field["particles"].append(
+            {
+                "x": rnd.randint(0, DUST_W - 1),
+                "y": rnd.randint(0, DUST_H - 1),
+                "dx": rnd.choice([-1, 0, 1]),
+                "dy": rnd.choice([-1, 0, 1]),
+                "ttl": rnd.randint(DUST_TTL_MIN, DUST_TTL_MAX),
+                "ch": rnd.choice(DUST_PARTICLE_CHARS),
+            }
+        )
+
 
 def dust_step(field: dict) -> None:
     field["tick"] += 1
@@ -580,105 +594,7 @@ def ensure_user_events_schema(cur: sqlite3.Cursor) -> None:
 
 
 def init_db() -> None:
-    conn = sqlite3.connect(DB_PATH)
-    try:
-        cur = conn.cursor()
-
-        # ----------------------------
-        # MODE LOCK (per-mode)
-        # ----------------------------
-        cur.execute("""
-            CREATE TABLE IF NOT EXISTS mode_lock (
-              user_id INTEGER NOT NULL,
-              mode TEXT NOT NULL,
-              locked INTEGER NOT NULL DEFAULT 0,
-              reason TEXT NOT NULL DEFAULT '',
-              updated_at INTEGER NOT NULL,
-              PRIMARY KEY (user_id, mode)
-            )
-        """)
-
-        cur.execute("""
-            CREATE TABLE IF NOT EXISTS user_settings (
-              user_id INTEGER PRIMARY KEY,
-              model TEXT NOT NULL,
-              image_model TEXT NOT NULL DEFAULT '',
-              image_provider TEXT NOT NULL DEFAULT 'openrouter'
-            )
-        """)
-
-        cur.execute("PRAGMA table_info(user_settings)")
-        _cols = {row[1] for row in cur.fetchall()}
-
-        if "image_model" not in _cols:
-            cur.execute("ALTER TABLE user_settings ADD COLUMN image_model TEXT NOT NULL DEFAULT ''")
-
-        if "image_provider" not in _cols:
-            cur.execute("ALTER TABLE user_settings ADD COLUMN image_provider TEXT NOT NULL DEFAULT 'openrouter'")
-
-
-        cur.execute("""
-            CREATE TABLE IF NOT EXISTS user_messages (
-              id INTEGER PRIMARY KEY AUTOINCREMENT,
-              user_id INTEGER NOT NULL,
-              role TEXT NOT NULL CHECK(role IN ('user','assistant')),
-              content TEXT NOT NULL,
-              created_at INTEGER NOT NULL
-            )
-        """)
-
-        # --- MIGRATION: user_messages.mode ---
-        cur.execute("PRAGMA table_info(user_messages)")
-        _cols = {row[1] for row in cur.fetchall()}
-        if "mode" not in _cols:
-            cur.execute("ALTER TABLE user_messages ADD COLUMN mode TEXT NOT NULL DEFAULT 'basic'")
-            cur.execute("CREATE INDEX IF NOT EXISTS idx_user_messages_user_id_mode ON user_messages(user_id, mode)")
-        # --- /MIGRATION ---
- 
-        cur.execute("CREATE INDEX IF NOT EXISTS idx_user_messages_user_id ON user_messages(user_id)")
-
-        ensure_photo_gate_schema(cur)
-
-        ensure_user_profile_schema(cur)
-
-        ensure_mode_state_schema(cur)
-
-        # ----------------------------
-        # USER EVENTS (analytics log)
-        # ----------------------------
-        cur.execute("""
-            CREATE TABLE IF NOT EXISTS user_events (
-              id INTEGER PRIMARY KEY AUTOINCREMENT,
-              ts INTEGER NOT NULL,                  -- unix time
-              user_id INTEGER NOT NULL,
-              chat_id INTEGER NOT NULL DEFAULT 0,
-              username TEXT NOT NULL DEFAULT '',
-              first_name TEXT NOT NULL DEFAULT '',
-              event_type TEXT NOT NULL,             -- message | switch_mode | photo_button | photo_request | photo_result
-              mode TEXT NOT NULL DEFAULT '',         -- current mode at event time
-
-              mode_from TEXT NOT NULL DEFAULT '',
-              mode_to   TEXT NOT NULL DEFAULT '',
-
-              message_id INTEGER NOT NULL DEFAULT 0,
-              text_len   INTEGER NOT NULL DEFAULT 0,
-
-              photo_provider TEXT NOT NULL DEFAULT '',
-              photo_model    TEXT NOT NULL DEFAULT '',
-              ok INTEGER NOT NULL DEFAULT 1,
-              note TEXT NOT NULL DEFAULT ''
-            )
-        """)
-        ensure_user_events_schema(cur)
-        ensure_relationship_table(DB_PATH)
-
-        cur.execute("CREATE INDEX IF NOT EXISTS idx_user_events_user_ts ON user_events(user_id, ts)")
-        cur.execute("CREATE INDEX IF NOT EXISTS idx_user_events_ts ON user_events(ts)")
-        cur.execute("CREATE INDEX IF NOT EXISTS idx_user_events_type ON user_events(event_type)")
-
-        conn.commit()
-    finally:
-        conn.close()
+    migrate_database(DB_PATH, include_relationship_state=True)
 
 def log_user_event(
     *,
@@ -2077,6 +1993,19 @@ def build_rap_submode_keyboard(current: str | None = None) -> InlineKeyboardMark
         ],
         [InlineKeyboardButton(text="?? ????????? ????????", callback_data="remindctx")],
     ]
+    return InlineKeyboardMarkup(inline_keyboard=rows)
+
+
+def build_modes_keyboard(user_id: int, current_mode: str | None = None) -> InlineKeyboardMarkup:
+    rows: list[list[InlineKeyboardButton]] = []
+    current = (current_mode or "").strip()
+    stats = get_active_dialog_stats(user_id)
+
+    for title, mode in MODE_CATALOG:
+        marker = " ✓" if mode == current else ""
+        prefix = "↩️ " if stats.get(mode, 0) else "🆕 "
+        rows.append([InlineKeyboardButton(text=f"{prefix}{title}{marker}", callback_data=f"setmode:{mode}")])
+
     return InlineKeyboardMarkup(inline_keyboard=rows)
 
 
