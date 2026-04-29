@@ -14,6 +14,7 @@ from src.core.contracts import (
     DeferredJob,
     JobStatus,
     JobType,
+    SessionRecord,
     UserRef,
 )
 from src.db.connection import connect_sqlite
@@ -152,6 +153,110 @@ class SQLiteRepositories:
             status=ConversationStatus.ACTIVE,
             is_default=is_default,
         )
+
+    def create_session(
+        self,
+        user_ref: UserRef,
+        *,
+        issued_at: int,
+        expires_at: int,
+        session_token: str | None = None,
+    ) -> SessionRecord:
+        user_id = self._user_id(user_ref)
+        resolved_token = session_token or uuid.uuid4().hex
+        record = SessionRecord(
+            session_token=resolved_token,
+            user_ref=user_ref,
+            issued_at=issued_at,
+            expires_at=expires_at,
+            last_seen_at=issued_at,
+        )
+        conn = self._connect()
+        try:
+            conn.execute(
+                """
+                INSERT INTO sessions(session_token, user_id, issued_at, expires_at, last_seen_at)
+                VALUES (?, ?, ?, ?, ?)
+                """,
+                (
+                    record.session_token,
+                    user_id,
+                    record.issued_at,
+                    record.expires_at,
+                    record.last_seen_at,
+                ),
+            )
+            conn.commit()
+        finally:
+            conn.close()
+        return record
+
+    def load_session(self, session_token: str) -> SessionRecord | None:
+        conn = self._connect()
+        try:
+            row = conn.execute(
+                """
+                SELECT session_token, user_id, issued_at, expires_at, last_seen_at
+                FROM sessions
+                WHERE session_token=?
+                """,
+                (session_token,),
+            ).fetchone()
+        finally:
+            conn.close()
+        if not row:
+            return None
+        return SessionRecord(
+            session_token=str(row[0]),
+            user_ref=legacy_user_ref(int(row[1])),
+            issued_at=int(row[2]),
+            expires_at=int(row[3]),
+            last_seen_at=int(row[4]),
+        )
+
+    def touch_session(self, session_token: str, *, last_seen_at: int | None = None) -> SessionRecord | None:
+        current = self.load_session(session_token)
+        if current is None:
+            return None
+        resolved_last_seen = current.last_seen_at if last_seen_at is None else last_seen_at
+        conn = self._connect()
+        try:
+            conn.execute(
+                """
+                UPDATE sessions
+                SET last_seen_at=?
+                WHERE session_token=?
+                """,
+                (resolved_last_seen, session_token),
+            )
+            conn.commit()
+        finally:
+            conn.close()
+        return SessionRecord(
+            session_token=current.session_token,
+            user_ref=current.user_ref,
+            issued_at=current.issued_at,
+            expires_at=current.expires_at,
+            last_seen_at=resolved_last_seen,
+        )
+
+    def delete_session(self, session_token: str) -> None:
+        conn = self._connect()
+        try:
+            conn.execute("DELETE FROM sessions WHERE session_token=?", (session_token,))
+            conn.commit()
+        finally:
+            conn.close()
+
+    def delete_expired_sessions(self, *, now_ts: int | None = None) -> int:
+        resolved_now = self._now() if now_ts is None else now_ts
+        conn = self._connect()
+        try:
+            cursor = conn.execute("DELETE FROM sessions WHERE expires_at <= ?", (resolved_now,))
+            conn.commit()
+            return int(cursor.rowcount or 0)
+        finally:
+            conn.close()
 
     def archive_conversation(self, user_ref: UserRef, conversation_ref: ConversationRef) -> None:
         user_id = self._user_id(user_ref)

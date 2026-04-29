@@ -36,6 +36,11 @@ def _get_csv_set(env: Mapping[str, str], key: str, default: str = "") -> set[str
     return {part.strip().lower() for part in raw.split(",") if part.strip()}
 
 
+def _get_csv_tuple(env: Mapping[str, str], key: str, default: str = "") -> tuple[str, ...]:
+    raw = env.get(key, default)
+    return tuple(part.strip() for part in raw.split(",") if part.strip())
+
+
 @dataclass(frozen=True, slots=True)
 class Settings:
     project_root: Path
@@ -85,6 +90,13 @@ class Settings:
     history_limit: int
     max_auto_continuations: int
     report_xlsx: str
+    http_host: str
+    http_port: int
+    http_cors_origins: tuple[str, ...]
+    http_session_ttl_sec: int
+    http_telegram_init_max_age_sec: int
+    http_session_rate_limit_window_sec: int
+    http_session_rate_limit_max_attempts: int
 
     @classmethod
     def from_env(
@@ -147,4 +159,11 @@ class Settings:
             history_limit=_get_int(source, "HISTORY_LIMIT", 12),
             max_auto_continuations=_get_int(source, "MAX_AUTO_CONTINUATIONS", 2),
             report_xlsx=_get_str(source, "REPORT_XLSX", "user_report.xlsx"),
+            http_host=_get_str(source, "HTTP_HOST", "0.0.0.0"),
+            http_port=_get_int(source, "HTTP_PORT", 8000),
+            http_cors_origins=_get_csv_tuple(source, "HTTP_CORS_ORIGINS"),
+            http_session_ttl_sec=_get_int(source, "HTTP_SESSION_TTL_SEC", 3600),
+            http_telegram_init_max_age_sec=_get_int(source, "HTTP_TELEGRAM_INIT_MAX_AGE_SEC", 90),
+            http_session_rate_limit_window_sec=_get_int(source, "HTTP_SESSION_RATE_LIMIT_WINDOW_SEC", 60),
+            http_session_rate_limit_max_attempts=_get_int(source, "HTTP_SESSION_RATE_LIMIT_MAX_ATTEMPTS", 5),
         )

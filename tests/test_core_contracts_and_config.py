@@ -41,6 +41,13 @@ def test_settings_from_env_parses_values() -> None:
             "PROMPT_TRANSLATION_FOR": "modelslab, together",
             "JUDGE_MAX_TOKENS": "333",
             "MAX_AUTO_CONTINUATIONS": "5",
+            "HTTP_HOST": "127.0.0.1",
+            "HTTP_PORT": "9000",
+            "HTTP_CORS_ORIGINS": "http://localhost:3000, https://miniapp.example",
+            "HTTP_SESSION_TTL_SEC": "7200",
+            "HTTP_TELEGRAM_INIT_MAX_AGE_SEC": "120",
+            "HTTP_SESSION_RATE_LIMIT_WINDOW_SEC": "30",
+            "HTTP_SESSION_RATE_LIMIT_MAX_ATTEMPTS": "7",
         },
         project_root=Path("D:/projects/Lina_AI"),
     )
@@ -53,6 +60,13 @@ def test_settings_from_env_parses_values() -> None:
     assert settings.prompt_translation_for == {"modelslab", "together"}
     assert settings.judge_max_tokens == 333
     assert settings.max_auto_continuations == 5
+    assert settings.http_host == "127.0.0.1"
+    assert settings.http_port == 9000
+    assert settings.http_cors_origins == ("http://localhost:3000", "https://miniapp.example")
+    assert settings.http_session_ttl_sec == 7200
+    assert settings.http_telegram_init_max_age_sec == 120
+    assert settings.http_session_rate_limit_window_sec == 30
+    assert settings.http_session_rate_limit_max_attempts == 7
     assert settings.bot_db_path.endswith("bot_state.db")
 
 

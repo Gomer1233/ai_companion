@@ -36,11 +36,13 @@ def table_exists(db_path: str, table_name: str) -> bool:
 async def test_main_startup_runs(module_loader):
     module = module_loader("src.main")
     module.dp.start_polling = AsyncMock()
+    module.run_http_server = AsyncMock()
     module.openrouter_client.aclose = AsyncMock()
 
     await module.main()
 
     module.dp.start_polling.assert_awaited_once_with(module.bot)
+    module.run_http_server.assert_awaited_once()
     module.openrouter_client.aclose.assert_awaited_once()
 
 
@@ -79,3 +81,11 @@ def test_init_db_creates_conversation_schema(module_loader):
     module.init_db()
 
     assert table_exists(module.DB_PATH, "conversations")
+
+
+def test_init_db_creates_sessions_schema(module_loader):
+    module = module_loader("src.main")
+
+    module.init_db()
+
+    assert table_exists(module.DB_PATH, "sessions")

@@ -7,7 +7,7 @@ from dataclasses import dataclass
 from src.db.connection import connect_sqlite
 
 
-SCHEMA_VERSION = 3
+SCHEMA_VERSION = 4
 
 
 @dataclass(frozen=True, slots=True)
@@ -35,6 +35,11 @@ def migrate_database(db_path: str, *, include_relationship_state: bool = False) 
         if current_version < 3:
             _migration_003_repository_state(conn, context)
             _set_schema_version(conn, 3)
+            current_version = 3
+
+        if current_version < 4:
+            _migration_004_sessions(conn, context)
+            _set_schema_version(conn, 4)
 
         conn.commit()
     finally:
@@ -449,6 +454,23 @@ def _migration_003_repository_state(conn: sqlite3.Connection, context: Migration
               updated_at = excluded.updated_at
             """
         )
+
+
+def _migration_004_sessions(conn: sqlite3.Connection, context: MigrationContext) -> None:
+    del context
+    conn.execute(
+        """
+        CREATE TABLE IF NOT EXISTS sessions (
+          session_token TEXT PRIMARY KEY,
+          user_id INTEGER NOT NULL,
+          issued_at INTEGER NOT NULL,
+          expires_at INTEGER NOT NULL,
+          last_seen_at INTEGER NOT NULL
+        )
+        """
+    )
+    conn.execute("CREATE INDEX IF NOT EXISTS idx_sessions_user_id ON sessions(user_id)")
+    conn.execute("CREATE INDEX IF NOT EXISTS idx_sessions_expires_at ON sessions(expires_at)")
 
 
 def _collect_user_ids(conn: sqlite3.Connection, context: MigrationContext) -> list[int]:

@@ -45,6 +45,9 @@ from src.prompts.relationship import (
     check_ghosting,
 )
 from src.prompts.lika_prompt import build_lika_system_prompt
+from src.adapters.http.app import create_app
+from src.adapters.http.dependencies import AppDependencies, ReadinessState
+from src.app.settings import Settings
 from src.core.runtime_helpers import (
     call_openrouter_with_meta as shared_call_openrouter_with_meta,
     chunk_text,
@@ -56,6 +59,7 @@ from src.core.runtime_helpers import (
 )
 from src.db.migrations import migrate_database
 from src.db.repositories import SQLiteRepositories, legacy_user_ref
+import uvicorn
 
 # ----------------------------
 # CONFIG
@@ -2938,10 +2942,40 @@ async def cb_imgcancel(callback: types.CallbackQuery):
 async def main():
     logging.info("DB_PATH=%s", DB_PATH)
     init_db()
+    settings = Settings.from_env()
+    readiness = ReadinessState()
+    http_app = create_app(
+        AppDependencies(
+            settings=settings,
+            repositories=DB_REPOSITORIES,
+            readiness=readiness,
+        )
+    )
+    http_shutdown = asyncio.Event()
+    http_task = asyncio.create_task(run_http_server(http_app, settings, http_shutdown))
+    readiness.mark_ready()
     try:
         await dp.start_polling(bot)
     finally:
+        http_shutdown.set()
+        await http_task
         await openrouter_client.aclose()
+
+
+async def run_http_server(app, settings: Settings, shutdown_event: asyncio.Event) -> None:
+    config = uvicorn.Config(
+        app,
+        host=settings.http_host,
+        port=settings.http_port,
+        log_level="info",
+    )
+    server = uvicorn.Server(config)
+    server_task = asyncio.create_task(server.serve())
+    try:
+        await shutdown_event.wait()
+    finally:
+        server.should_exit = True
+        await server_task
 
 
 if __name__ == "__main__":
