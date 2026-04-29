@@ -89,3 +89,18 @@ def test_init_db_creates_sessions_schema(module_loader):
     module.init_db()
 
     assert table_exists(module.DB_PATH, "sessions")
+
+
+def test_main_import_uses_postgres_repository_when_configured(module_loader):
+    module = module_loader(
+        "src.main",
+        env={
+            "DB_BACKEND": "postgres",
+            "DATABASE_URL": "postgresql://lina_app:secret@db.example/lina",
+        },
+    )
+
+    from src.db.postgres import PostgresRepositories
+
+    assert isinstance(module.DB_REPOSITORIES, PostgresRepositories)
+    assert module.DB_REPOSITORIES.database_url == "postgresql://lina_app:secret@db.example/lina"

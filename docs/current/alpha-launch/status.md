@@ -18,7 +18,7 @@
 - `multichannel-core` remains the completed foundation initiative and should not be overwritten to carry alpha launch planning.
 - Alpha launch planning now lives under `docs/current/alpha-launch/`.
 - `ALPHA-002 FastAPI HTTP Adapter` is merged to `main`.
-- `ALPHA-003 Postgres Backend + Cutover Runbook` is the next backlog item and is ready to start.
+- `ALPHA-003 Postgres Backend + Cutover Runbook` is implementation-complete on `codex/alpha-003-postgres-cutover` and ready for PR publication/review.
 
 ## Completed
 
@@ -39,10 +39,32 @@
   - Telegram Mini App init-data HMAC validation on the backend before session issuance
   - rejection of unsigned or tampered init-data payloads
 - `ALPHA-002 FastAPI HTTP Adapter` is merged to `main`
+- `ALPHA-003` has started with:
+  - backend selection through `DB_BACKEND`
+  - Supabase/Postgres `DATABASE_URL` settings
+  - repository factory wiring
+  - initial Postgres schema and least-privilege grant template
+  - one-way cutover runbook under `prs/alpha-003-postgres-cutover/cutover-runbook.md`
+  - `TEST_DATABASE_URL`-gated Postgres integration tests for repository and HTTP adapter behavior
+  - Supabase staging project `Lina_AI_staging` created as `aruvavburiqtedregusi`
+  - Supabase migrations applied on staging:
+    - `alpha_003_initial_postgres_schema`
+    - `alpha_003_enable_public_table_rls`
+    - `alpha_003_add_foreign_key_indexes`
+  - Supabase security advisors reduced from RLS errors to `RLS Enabled No Policy` INFO notices, matching the alpha no-browser-DB stance
+  - `TEST_DATABASE_URL`-gated Postgres integration tests passed against `Lina_AI_staging`:
+    - `python -m pytest tests/test_postgres_integration.py -q`
+    - result: `2 passed`
+  - SQLite fixture cutover rehearsal added:
+    - `tests/test_cutover_rehearsal.py`
+    - `tests/test_postgres_integration.py::test_sqlite_fixture_cutover_rehearsal_imports_into_postgres`
+  - expanded `TEST_DATABASE_URL`-gated Postgres integration tests passed against `Lina_AI_staging`:
+    - `python -m pytest tests/test_postgres_integration.py -q`
+    - result: `3 passed`
 
 ## Next Step
 
-Start `ALPHA-003 Postgres Backend + Cutover Runbook` from its existing `brief.md` and `tasks.md`, keeping the HTTP adapter contract unchanged while swapping the persistence backend.
+Open and review the `ALPHA-003` PR, then move to `ALPHA-004 Provider Matrix + Explicit Policy Layer` after merge.
 
 ## Risks / Notes
 

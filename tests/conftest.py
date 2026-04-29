@@ -28,6 +28,8 @@ ENV_KEYS = {
     "BOT_DB_PATH",
     "DEFAULT_MODEL",
     "OPENROUTER_IMAGE_MODEL",
+    "DB_BACKEND",
+    "DATABASE_URL",
 }
 
 

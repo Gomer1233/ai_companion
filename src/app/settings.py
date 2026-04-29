@@ -97,6 +97,8 @@ class Settings:
     http_telegram_init_max_age_sec: int
     http_session_rate_limit_window_sec: int
     http_session_rate_limit_max_attempts: int
+    db_backend: str
+    database_url: str
 
     @classmethod
     def from_env(
@@ -166,4 +168,6 @@ class Settings:
             http_telegram_init_max_age_sec=_get_int(source, "HTTP_TELEGRAM_INIT_MAX_AGE_SEC", 90),
             http_session_rate_limit_window_sec=_get_int(source, "HTTP_SESSION_RATE_LIMIT_WINDOW_SEC", 60),
             http_session_rate_limit_max_attempts=_get_int(source, "HTTP_SESSION_RATE_LIMIT_MAX_ATTEMPTS", 5),
+            db_backend=_get_str(source, "DB_BACKEND", "sqlite").lower(),
+            database_url=_get_str(source, "DATABASE_URL"),
         )

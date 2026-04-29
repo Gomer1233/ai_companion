@@ -57,8 +57,9 @@ from src.core.runtime_helpers import (
     keep_typing,
     strip_internal_thoughts,
 )
-from src.db.migrations import migrate_database
-from src.db.repositories import SQLiteRepositories, legacy_user_ref
+from src.db.bootstrap import bootstrap_database
+from src.db.factory import create_repositories
+from src.db.repositories import legacy_user_ref
 import uvicorn
 
 # ----------------------------
@@ -180,7 +181,8 @@ openrouter_client = httpx.AsyncClient(timeout=OR_TIMEOUT, limits=OR_LIMITS)  # h
 
 # Get project root directory for DB path
 PROJECT_ROOT = Path(__file__).parent.parent
-DB_PATH = os.getenv("BOT_DB_PATH", str(PROJECT_ROOT / "bot_state.db"))
+SETTINGS = Settings.from_env(project_root=PROJECT_ROOT)
+DB_PATH = SETTINGS.bot_db_path
 DEFAULT_MODEL = os.getenv("DEFAULT_MODEL", "openai/gpt-4o-mini")
 
 JUDGE_MODEL_WHORE = os.getenv("JUDGE_MODEL_WHORE", "openai/gpt-4o-mini").strip()
@@ -190,7 +192,11 @@ JUDGE_MAX_TOKENS = int(os.getenv("JUDGE_MAX_TOKENS", "220"))
 # Сколько сообщений хранить (user+assistant вместе). Например 12 = 6 реплик туда-обратно.
 HISTORY_LIMIT = int(os.getenv("HISTORY_LIMIT", "12"))
 
-DB_REPOSITORIES = SQLiteRepositories(DB_PATH, history_limit=HISTORY_LIMIT)
+DB_REPOSITORIES = create_repositories(SETTINGS, history_limit=HISTORY_LIMIT)
+
+
+def _connect_runtime_db():
+    return DB_REPOSITORIES._connect()
 
 
 def _repo_refs(user_id: int):
@@ -598,7 +604,7 @@ def ensure_user_events_schema(cur: sqlite3.Cursor) -> None:
 
 
 def init_db() -> None:
-    migrate_database(DB_PATH, include_relationship_state=True)
+    bootstrap_database(SETTINGS, include_relationship_state=True)
 
 def log_user_event(
     *,
@@ -628,7 +634,7 @@ def log_user_event(
     Пишет 1 событие в user_events. Никогда не кидает исключение наружу.
     """
     try:
-        conn = sqlite3.connect(DB_PATH)
+        conn = _connect_runtime_db()
         try:
             cur = conn.cursor()
             cur.execute(
@@ -675,7 +681,7 @@ def log_user_event(
 
 
 def get_user_model(user_id: int) -> str:
-    conn = sqlite3.connect(DB_PATH)
+    conn = _connect_runtime_db()
     try:
         cur = conn.cursor()
         cur.execute("SELECT model FROM user_settings WHERE user_id = ?", (user_id,))
@@ -700,7 +706,7 @@ def get_user_model(user_id: int) -> str:
 
 
 def set_user_model(user_id: int, model: str) -> None:
-    conn = sqlite3.connect(DB_PATH)
+    conn = _connect_runtime_db()
     try:
         cur = conn.cursor()
         # НЕ REPLACE: обновляем только model
@@ -757,7 +763,7 @@ def get_history(user_id: int, mode: str) -> List[Dict[str, Any]]:
 
 def get_active_dialog_stats(user_id: int) -> dict[str, int]:
     """Сколько сообщений накоплено по каждому mode в user_messages."""
-    conn = sqlite3.connect(DB_PATH)
+    conn = _connect_runtime_db()
     try:
         cur = conn.cursor()
         cur.execute(
@@ -806,7 +812,7 @@ def upsert_photo_gate(
     )
 
 def get_user_profile(user_id: int) -> Dict[str, str]:
-    conn = sqlite3.connect(DB_PATH)
+    conn = _connect_runtime_db()
     try:
         cur = conn.cursor()
         cur.execute("""
@@ -868,12 +874,18 @@ def strip_game_over_markers(text: str) -> tuple[str, bool]:
 
 
 def lock_chat(user_id: int, reason: str = "") -> None:
-    conn = sqlite3.connect(DB_PATH)
+    conn = _connect_runtime_db()
     try:
         cur = conn.cursor()
         # гарантируем строку в user_profile, чтобы UPDATE не был пустым
-        cur.execute("INSERT OR IGNORE INTO user_profile(user_id, preferred_name, preferred_title, mode) VALUES(?,?,?,?)",
-                    (user_id, "", "", "basic"))
+        cur.execute(
+            """
+            INSERT INTO user_profile(user_id, preferred_name, preferred_title, mode)
+            VALUES(?,?,?,?)
+            ON CONFLICT(user_id) DO NOTHING
+            """,
+            (user_id, "", "", "basic"),
+        )
         cur.execute("""
             UPDATE user_profile
             SET chat_locked = 1,
@@ -885,7 +897,7 @@ def lock_chat(user_id: int, reason: str = "") -> None:
         conn.close()
 
 def unlock_chat(user_id: int) -> None:
-    conn = sqlite3.connect(DB_PATH)
+    conn = _connect_runtime_db()
     try:
         cur = conn.cursor()
         cur.execute("""
@@ -924,7 +936,7 @@ def set_user_profile(
     preferred_title: str | None = None,
     mode: str | None = None,
 ) -> None:
-    conn = sqlite3.connect(DB_PATH)
+    conn = _connect_runtime_db()
     try:
         cur = conn.cursor()
         cur.execute("""
@@ -941,7 +953,7 @@ def set_user_profile(
 
 
 def set_mode_picked(user_id: int, picked: bool) -> None:
-    conn = sqlite3.connect(DB_PATH)
+    conn = _connect_runtime_db()
     try:
         cur = conn.cursor()
         cur.execute(
@@ -2942,17 +2954,16 @@ async def cb_imgcancel(callback: types.CallbackQuery):
 async def main():
     logging.info("DB_PATH=%s", DB_PATH)
     init_db()
-    settings = Settings.from_env()
     readiness = ReadinessState()
     http_app = create_app(
         AppDependencies(
-            settings=settings,
+            settings=SETTINGS,
             repositories=DB_REPOSITORIES,
             readiness=readiness,
         )
     )
     http_shutdown = asyncio.Event()
-    http_task = asyncio.create_task(run_http_server(http_app, settings, http_shutdown))
+    http_task = asyncio.create_task(run_http_server(http_app, SETTINGS, http_shutdown))
     readiness.mark_ready()
     try:
         await dp.start_polling(bot)
