@@ -74,10 +74,10 @@ async def test_full_reset_clears_history_mode_lock_photo_gate_and_relationship_s
     module.save_mode_state(1, "whore", state)
     module.lock_mode(1, "whore", reason="GAME OVER")
     module.upsert_photo_gate(1, score=1, attempts=1, last_ask_ts=1, cooldown_until_ts=2, awaiting_image_prompt=1, image_cooldown_until_ts=5)
-    rel_state = module.get_relationship_state(module.DB_PATH, 1, "whore")
+    rel_state = module._load_relationship_state(1, "whore")
     rel_state.points = 321
     rel_state.user_name = "Tester"
-    module.save_relationship_state(module.DB_PATH, rel_state)
+    module._save_relationship_state(rel_state)
     message = FakeMessage("/reset")
 
     await module.cmd_reset(message)
@@ -90,7 +90,7 @@ async def test_full_reset_clears_history_mode_lock_photo_gate_and_relationship_s
     assert table_row_count(module.DB_PATH, "mode_state", "user_id=?", (1,)) == 0
     assert table_row_count(module.DB_PATH, "mode_lock", "user_id=?", (1,)) == 0
     assert table_row_count(module.DB_PATH, "photo_gate", "user_id=?", (1,)) == 0
-    reset_state = module.get_relationship_state(module.DB_PATH, 1, "whore")
+    reset_state = module._load_relationship_state(1, "whore")
     assert reset_state.points == 0
     assert reset_state.user_name is None
     assert HISTORY_RESET_TEXT in message.answers[-1]["text"]
@@ -212,14 +212,14 @@ async def test_whore_reset_clears_relationship_state(module_loader, mark_mode_pi
     module = module_loader("src.main")
     module.init_db()
     mark_mode_picked(module, 1, mode="whore")
-    state = module.get_relationship_state(module.DB_PATH, 1, "whore")
+    state = module._load_relationship_state(1, "whore")
     state.points = 123
     state.user_name = "Tester"
-    module.save_relationship_state(module.DB_PATH, state)
+    module._save_relationship_state(state)
     message = FakeMessage(RESET_MODE_TEXT)
 
     await module.reset_here_btn(message)
 
-    reset_state = module.get_relationship_state(module.DB_PATH, 1, "whore")
+    reset_state = module._load_relationship_state(1, "whore")
     assert reset_state.points == 0
     assert reset_state.user_name is None

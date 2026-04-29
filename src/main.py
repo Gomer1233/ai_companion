@@ -37,9 +37,7 @@ from aiogram.types import BufferedInputFile
 from aiogram.types.input_file import FSInputFile
 
 from src.prompts.relationship import (
-    get_relationship_state,
-    save_relationship_state,
-    reset_relationship_state,
+    RelationshipState,
     analyze_user_message,
     update_relationship_from_analysis,
     check_ghosting,
@@ -57,8 +55,9 @@ from src.core.runtime_helpers import (
     keep_typing,
     strip_internal_thoughts,
 )
-from src.db.migrations import migrate_database
-from src.db.repositories import SQLiteRepositories, legacy_user_ref
+from src.db.bootstrap import bootstrap_database
+from src.db.factory import create_repositories
+from src.db.repositories import legacy_user_ref
 import uvicorn
 
 # ----------------------------
@@ -180,7 +179,8 @@ openrouter_client = httpx.AsyncClient(timeout=OR_TIMEOUT, limits=OR_LIMITS)  # h
 
 # Get project root directory for DB path
 PROJECT_ROOT = Path(__file__).parent.parent
-DB_PATH = os.getenv("BOT_DB_PATH", str(PROJECT_ROOT / "bot_state.db"))
+SETTINGS = Settings.from_env(project_root=PROJECT_ROOT)
+DB_PATH = SETTINGS.bot_db_path
 DEFAULT_MODEL = os.getenv("DEFAULT_MODEL", "openai/gpt-4o-mini")
 
 JUDGE_MODEL_WHORE = os.getenv("JUDGE_MODEL_WHORE", "openai/gpt-4o-mini").strip()
@@ -190,13 +190,30 @@ JUDGE_MAX_TOKENS = int(os.getenv("JUDGE_MAX_TOKENS", "220"))
 # Сколько сообщений хранить (user+assistant вместе). Например 12 = 6 реплик туда-обратно.
 HISTORY_LIMIT = int(os.getenv("HISTORY_LIMIT", "12"))
 
-DB_REPOSITORIES = SQLiteRepositories(DB_PATH, history_limit=HISTORY_LIMIT)
+DB_REPOSITORIES = create_repositories(SETTINGS, include_relationship_state=True, history_limit=HISTORY_LIMIT)
+
+
+def _connect_runtime_db():
+    return DB_REPOSITORIES._connect()
 
 
 def _repo_refs(user_id: int):
     user_ref = legacy_user_ref(user_id)
     conversation = DB_REPOSITORIES.ensure_default_conversation(user_ref)
     return user_ref, conversation.conversation_ref
+
+
+def _load_relationship_state(user_id: int, mode: str = "whore") -> RelationshipState:
+    user_ref, conversation_ref = _repo_refs(user_id)
+    data = DB_REPOSITORIES.load_relationship_state(user_ref, conversation_ref, mode)
+    if data is None:
+        return RelationshipState(user_id=user_id, mode=mode)
+    return RelationshipState.from_dict(user_id, mode, data)
+
+
+def _save_relationship_state(state: RelationshipState) -> None:
+    user_ref, conversation_ref = _repo_refs(state.user_id)
+    DB_REPOSITORIES.save_relationship_state(user_ref, conversation_ref, state.mode, state.to_dict())
 
 MODEL_PRESETS = [
     "openai/gpt-4o-mini",  # Starting at $0.15/M input tokens Starting at $0.60/M output tokens
@@ -598,7 +615,7 @@ def ensure_user_events_schema(cur: sqlite3.Cursor) -> None:
 
 
 def init_db() -> None:
-    migrate_database(DB_PATH, include_relationship_state=True)
+    bootstrap_database(SETTINGS, include_relationship_state=True)
 
 def log_user_event(
     *,
@@ -628,7 +645,7 @@ def log_user_event(
     Пишет 1 событие в user_events. Никогда не кидает исключение наружу.
     """
     try:
-        conn = sqlite3.connect(DB_PATH)
+        conn = _connect_runtime_db()
         try:
             cur = conn.cursor()
             cur.execute(
@@ -675,7 +692,7 @@ def log_user_event(
 
 
 def get_user_model(user_id: int) -> str:
-    conn = sqlite3.connect(DB_PATH)
+    conn = _connect_runtime_db()
     try:
         cur = conn.cursor()
         cur.execute("SELECT model FROM user_settings WHERE user_id = ?", (user_id,))
@@ -700,7 +717,7 @@ def get_user_model(user_id: int) -> str:
 
 
 def set_user_model(user_id: int, model: str) -> None:
-    conn = sqlite3.connect(DB_PATH)
+    conn = _connect_runtime_db()
     try:
         cur = conn.cursor()
         # НЕ REPLACE: обновляем только model
@@ -757,7 +774,7 @@ def get_history(user_id: int, mode: str) -> List[Dict[str, Any]]:
 
 def get_active_dialog_stats(user_id: int) -> dict[str, int]:
     """Сколько сообщений накоплено по каждому mode в user_messages."""
-    conn = sqlite3.connect(DB_PATH)
+    conn = _connect_runtime_db()
     try:
         cur = conn.cursor()
         cur.execute(
@@ -806,7 +823,7 @@ def upsert_photo_gate(
     )
 
 def get_user_profile(user_id: int) -> Dict[str, str]:
-    conn = sqlite3.connect(DB_PATH)
+    conn = _connect_runtime_db()
     try:
         cur = conn.cursor()
         cur.execute("""
@@ -868,12 +885,18 @@ def strip_game_over_markers(text: str) -> tuple[str, bool]:
 
 
 def lock_chat(user_id: int, reason: str = "") -> None:
-    conn = sqlite3.connect(DB_PATH)
+    conn = _connect_runtime_db()
     try:
         cur = conn.cursor()
         # гарантируем строку в user_profile, чтобы UPDATE не был пустым
-        cur.execute("INSERT OR IGNORE INTO user_profile(user_id, preferred_name, preferred_title, mode) VALUES(?,?,?,?)",
-                    (user_id, "", "", "basic"))
+        cur.execute(
+            """
+            INSERT INTO user_profile(user_id, preferred_name, preferred_title, mode)
+            VALUES(?,?,?,?)
+            ON CONFLICT(user_id) DO NOTHING
+            """,
+            (user_id, "", "", "basic"),
+        )
         cur.execute("""
             UPDATE user_profile
             SET chat_locked = 1,
@@ -885,7 +908,7 @@ def lock_chat(user_id: int, reason: str = "") -> None:
         conn.close()
 
 def unlock_chat(user_id: int) -> None:
-    conn = sqlite3.connect(DB_PATH)
+    conn = _connect_runtime_db()
     try:
         cur = conn.cursor()
         cur.execute("""
@@ -924,7 +947,7 @@ def set_user_profile(
     preferred_title: str | None = None,
     mode: str | None = None,
 ) -> None:
-    conn = sqlite3.connect(DB_PATH)
+    conn = _connect_runtime_db()
     try:
         cur = conn.cursor()
         cur.execute("""
@@ -941,7 +964,7 @@ def set_user_profile(
 
 
 def set_mode_picked(user_id: int, picked: bool) -> None:
-    conn = sqlite3.connect(DB_PATH)
+    conn = _connect_runtime_db()
     try:
         cur = conn.cursor()
         cur.execute(
@@ -1781,9 +1804,6 @@ async def _reset_current_mode(user_id: int, mode: str, *, note: str, chat_id: in
     user_ref, conversation_ref = _repo_refs(user_id)
     DB_REPOSITORIES.reset_mode_in_conversation(user_ref, conversation_ref, mode)
 
-    if mode == "whore":
-        reset_relationship_state(DB_PATH, user_id, mode)
-
     return mode
 
 
@@ -1930,7 +1950,7 @@ async def cmd_status(message: types.Message):
         await message.answer("Команда работает только в режиме Шлюшка")
         return
 
-    rel_state = get_relationship_state(DB_PATH, user_id, mode)
+    rel_state = _load_relationship_state(user_id, mode)
     status_text = (
         "Статус отношений с Ликой\n\n"
         f"Имя: {rel_state.user_name or 'неизвестно'}\n"
@@ -2284,8 +2304,6 @@ async def cmd_reset(message: types.Message):
     set_mode_picked(user_id, False)
     IMAGE_JOBS.pop(user_id, None)
 
-    reset_relationship_state(DB_PATH, user_id, "whore")
-
     await message.answer(
         "\u0421\u0431\u0440\u043e\u0441 \u0441\u0434\u0435\u043b\u0430\u043b.\n"
         "\u0420\u0435\u0436\u0438\u043c: `basic`\n"
@@ -2535,14 +2553,14 @@ async def on_text(message: types.Message):
     memory_block = format_state_block(state)
     
     if mode == "whore":
-        rel_state = get_relationship_state(DB_PATH, user_id, mode)
+        rel_state = _load_relationship_state(user_id, mode)
         ghost_mood = check_ghosting(rel_state)
         if ghost_mood:
             rel_state.mood = ghost_mood
 
         analysis = analyze_user_message(user_text, rel_state)
         rel_state = update_relationship_from_analysis(rel_state, analysis)
-        save_relationship_state(DB_PATH, rel_state)
+        _save_relationship_state(rel_state)
         system_base = build_lika_system_prompt(rel_state)
     else:
         system_base = MODE_TO_SYSTEM_PROMPT.get(mode)
@@ -2942,17 +2960,16 @@ async def cb_imgcancel(callback: types.CallbackQuery):
 async def main():
     logging.info("DB_PATH=%s", DB_PATH)
     init_db()
-    settings = Settings.from_env()
     readiness = ReadinessState()
     http_app = create_app(
         AppDependencies(
-            settings=settings,
+            settings=SETTINGS,
             repositories=DB_REPOSITORIES,
             readiness=readiness,
         )
     )
     http_shutdown = asyncio.Event()
-    http_task = asyncio.create_task(run_http_server(http_app, settings, http_shutdown))
+    http_task = asyncio.create_task(run_http_server(http_app, SETTINGS, http_shutdown))
     readiness.mark_ready()
     try:
         await dp.start_polling(bot)

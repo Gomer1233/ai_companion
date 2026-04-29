@@ -48,6 +48,8 @@ def test_settings_from_env_parses_values() -> None:
             "HTTP_TELEGRAM_INIT_MAX_AGE_SEC": "120",
             "HTTP_SESSION_RATE_LIMIT_WINDOW_SEC": "30",
             "HTTP_SESSION_RATE_LIMIT_MAX_ATTEMPTS": "7",
+            "DB_BACKEND": "postgres",
+            "DATABASE_URL": "postgresql://lina_app:secret@db.example/lina",
         },
         project_root=Path("D:/projects/Lina_AI"),
     )
@@ -67,6 +69,8 @@ def test_settings_from_env_parses_values() -> None:
     assert settings.http_telegram_init_max_age_sec == 120
     assert settings.http_session_rate_limit_window_sec == 30
     assert settings.http_session_rate_limit_max_attempts == 7
+    assert settings.db_backend == "postgres"
+    assert settings.database_url == "postgresql://lina_app:secret@db.example/lina"
     assert settings.bot_db_path.endswith("bot_state.db")
 
 

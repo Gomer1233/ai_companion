@@ -11,7 +11,7 @@ Lina AI now runs as a single Telegram bot launcher with one active entrypoint an
 - `src/core/`
   Core contracts and shared transition runtime.
 - `src/db/`
-  SQLite connection, forward-only migrations, and repositories.
+  SQLite local persistence, Postgres production bootstrap, and repository implementations.
 - `src/adapters/telegram/`
   Telegram parser, renderer, and routing helpers.
 - `tests/`
@@ -46,6 +46,9 @@ copy .env.example .env
 ```bash
 python -m src.main
 ```
+
+Local development defaults to SQLite via `DB_BACKEND=sqlite` and `BOT_DB_PATH`.
+Production alpha uses Supabase Postgres by setting `DB_BACKEND=postgres` and `DATABASE_URL` in Railway.
 
 Utilities:
 
