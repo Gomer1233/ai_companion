@@ -226,3 +226,37 @@ def test_reset_user_all_clears_all_conversation_state_and_appends_events(tmp_pat
         assert conn.execute("SELECT COUNT(*) FROM user_events WHERE user_id=106").fetchone()[0] == 1
     finally:
         conn.close()
+
+
+def test_session_lifecycle_and_expiry_cleanup(tmp_path) -> None:
+    _, repo = _make_repo(tmp_path)
+    user_ref = UserRef("107")
+    now_ts = int(time.time())
+
+    created = repo.create_session(
+        user_ref,
+        issued_at=now_ts,
+        expires_at=now_ts + 3600,
+    )
+
+    loaded = repo.load_session(created.session_token)
+    assert loaded is not None
+    assert loaded.user_ref == user_ref
+    assert loaded.issued_at == now_ts
+    assert loaded.expires_at == now_ts + 3600
+    assert loaded.last_seen_at == now_ts
+
+    touched = repo.touch_session(created.session_token, last_seen_at=now_ts + 10)
+    assert touched is not None
+    assert touched.last_seen_at == now_ts + 10
+
+    expired = repo.create_session(
+        user_ref,
+        issued_at=now_ts - 100,
+        expires_at=now_ts - 1,
+    )
+    assert repo.delete_expired_sessions(now_ts=now_ts) == 1
+    assert repo.load_session(expired.session_token) is None
+
+    repo.delete_session(created.session_token)
+    assert repo.load_session(created.session_token) is None

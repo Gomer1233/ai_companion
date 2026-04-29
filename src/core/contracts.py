@@ -246,3 +246,19 @@ class AnalyticsEvent:
     job_id: str | None = None
     note: str | None = None
 
+
+@dataclass(frozen=True, slots=True)
+class SessionRecord:
+    session_token: str
+    user_ref: UserRef
+    issued_at: int
+    expires_at: int
+    last_seen_at: int
+
+    def __post_init__(self) -> None:
+        if not self.session_token or not self.session_token.strip():
+            raise ValueError("SessionRecord.session_token must be non-empty")
+        if self.expires_at <= self.issued_at:
+            raise ValueError("SessionRecord.expires_at must be greater than issued_at")
+        if self.last_seen_at < self.issued_at:
+            raise ValueError("SessionRecord.last_seen_at must be >= issued_at")

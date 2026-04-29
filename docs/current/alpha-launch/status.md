@@ -17,7 +17,7 @@
 
 - `multichannel-core` remains the completed foundation initiative and should not be overwritten to carry alpha launch planning.
 - Alpha launch planning now lives under `docs/current/alpha-launch/`.
-- `src/main.py` still needs service extraction and launcher thinning before HTTP, Postgres, and Mini App work should proceed.
+- `ALPHA-002 FastAPI HTTP Adapter` implementation is complete on the current branch and ready for PR publication/review.
 
 ## Completed
 
@@ -27,14 +27,21 @@
 - ALPHA-001 started with shared runtime helper extraction out of `src/main.py` and `src/core/legacy_runtime.py`
 - `src/main.py` history, photo gate, mode state, and mode lock wrappers now route through `SQLiteRepositories` instead of ad hoc launcher SQL
 - mode switch and reset flows in `src/main.py` now use repository-backed conversation reset/active-mode paths, with legacy relationship cleanup left as an explicit hook
+- `ALPHA-002` now adds:
+  - HTTP runtime settings
+  - SQLite-backed opaque sessions
+  - FastAPI adapter under `src/adapters/http/**`
+  - `healthz`, `readyz`, `POST /api/session/telegram`, and protected `GET /api/*`
+  - CORS allowlist, session exchange rate limiting, and launcher lifecycle integration
+  - focused HTTP adapter tests plus passing full backend verification
 
 ## Next Step
 
-Continue `ALPHA-001 Finish Refactor + Boundaries` by addressing the remaining launcher-owned profile/settings helpers and extracting more orchestration out of `src/main.py`.
+Open and review the `ALPHA-002` PR, then move to the next alpha-launch backlog item after merge.
 
 ## Risks / Notes
 
-- The alpha release path depends on finishing launcher cleanup before introducing a second transport surface.
+- `src/main.py` is still too large, so HTTP integration must stay transport-thin and avoid widening scope into a full launcher rewrite.
 - Explicit launch scope is intentionally conservative on capability surface, but persona scope remains subject to audit freeze.
 - Security baseline assumes no direct browser path to Supabase in alpha v1.
 

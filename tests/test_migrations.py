@@ -39,6 +39,7 @@ def test_fresh_database_migrates_to_head(tmp_path):
     assert _table_exists(db_path, "conversation_mode_lock")
     assert _table_exists(db_path, "conversation_photo_gate")
     assert _table_exists(db_path, "jobs")
+    assert _table_exists(db_path, "sessions")
     assert "conversation_ref" in _column_names(db_path, "user_messages")
     assert "conversation_ref" in _column_names(db_path, "mode_state")
     assert "conversation_ref" in _column_names(db_path, "mode_lock")
@@ -48,7 +49,7 @@ def test_fresh_database_migrates_to_head(tmp_path):
     conn = sqlite3.connect(db_path)
     try:
         version = conn.execute("SELECT version FROM schema_version WHERE id = 1").fetchone()[0]
-        assert version == 3
+        assert version == 4
     finally:
         conn.close()
 
@@ -98,11 +99,12 @@ def test_legacy_database_backfills_default_conversation(tmp_path):
         assert conn.execute("SELECT conversation_ref FROM photo_gate WHERE user_id=1").fetchone()[0] == default_conversation_ref(1)
         assert conn.execute("SELECT conversation_ref FROM user_events WHERE user_id=1").fetchone()[0] == default_conversation_ref(1)
         assert conn.execute("SELECT conversation_ref FROM relationship_state WHERE user_id=2 AND mode='whore'").fetchone()[0] == default_conversation_ref(2)
-        assert conn.execute("SELECT version FROM schema_version WHERE id = 1").fetchone()[0] == 3
+        assert conn.execute("SELECT version FROM schema_version WHERE id = 1").fetchone()[0] == 4
         assert conn.execute("SELECT COUNT(*) FROM conversation_mode_state").fetchone()[0] == 1
         assert conn.execute("SELECT COUNT(*) FROM conversation_mode_lock").fetchone()[0] == 1
         assert conn.execute("SELECT COUNT(*) FROM conversation_photo_gate").fetchone()[0] == 1
         assert conn.execute("SELECT COUNT(*) FROM conversation_relationship_state").fetchone()[0] == 1
+        assert conn.execute("SELECT COUNT(*) FROM sessions").fetchone()[0] == 0
     finally:
         conn.close()
 
@@ -117,7 +119,8 @@ def test_migrator_rerun_is_idempotent(tmp_path):
     conn = sqlite3.connect(db_path)
     try:
         version = conn.execute("SELECT version FROM schema_version WHERE id = 1").fetchone()[0]
-        assert version == 3
+        assert version == 4
         assert conn.execute("SELECT COUNT(*) FROM conversations").fetchone()[0] == 0
+        assert conn.execute("SELECT COUNT(*) FROM sessions").fetchone()[0] == 0
     finally:
         conn.close()
