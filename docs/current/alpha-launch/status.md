@@ -18,7 +18,7 @@
 - `multichannel-core` remains the completed foundation initiative and should not be overwritten to carry alpha launch planning.
 - Alpha launch planning now lives under `docs/current/alpha-launch/`.
 - `ALPHA-002 FastAPI HTTP Adapter` is merged to `main`.
-- `ALPHA-003 Postgres Backend + Cutover Runbook` is under review on `codex/alpha-003-postgres-cutover`; P1 review follow-ups are being addressed on the same branch.
+- `ALPHA-003 Postgres Backend + Cutover Runbook` is ready for merge review on `codex/alpha-003-postgres-cutover`; P1 review follow-ups are addressed and pushed, but the branch is not merged to `main` yet.
 
 ## Completed
 
@@ -70,11 +70,12 @@
 
 ## Next Step
 
-Re-run full verification for the `ALPHA-003` review follow-ups, then update the PR and proceed to merge review.
+Merge `codex/alpha-003-postgres-cutover` after review approval, then start `ALPHA-004 Provider Matrix + Explicit Policy Layer` from updated `main`.
 
 ## Risks / Notes
 
 - `src/main.py` is still too large, so HTTP integration must stay transport-thin and avoid widening scope into a full launcher rewrite.
 - Explicit launch scope is intentionally conservative on capability surface, but persona scope remains subject to audit freeze.
 - Security baseline assumes no direct browser path to Supabase in alpha v1.
+- Do not start `ALPHA-004` on top of unmerged `ALPHA-003` unless we intentionally choose a stacked branch.
 
