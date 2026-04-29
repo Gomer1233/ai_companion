@@ -1,9 +1,11 @@
 from __future__ import annotations
 
+import hashlib
+import hmac
 import json
 import time
 from dataclasses import dataclass, field
-from urllib.parse import parse_qs
+from urllib.parse import parse_qsl
 
 from fastapi import HTTPException, Request, status
 
@@ -53,10 +55,21 @@ def get_app_dependencies(request: Request) -> AppDependencies:
 
 
 def verify_telegram_init_data(init_data: str, settings: Settings, *, now_ts: int | None = None) -> UserRef:
-    parsed = parse_qs(init_data, strict_parsing=True)
-    auth_date_raw = parsed.get("auth_date", [None])[0]
-    user_raw = parsed.get("user", [None])[0]
-    if auth_date_raw is None or user_raw is None:
+    parsed_pairs = parse_qsl(init_data, strict_parsing=True, keep_blank_values=True)
+    parsed = dict(parsed_pairs)
+    if len(parsed) != len(parsed_pairs):
+        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="invalid_init_data")
+
+    received_hash = parsed.pop("hash", None)
+    auth_date_raw = parsed.get("auth_date")
+    user_raw = parsed.get("user")
+    if received_hash is None or auth_date_raw is None or user_raw is None:
+        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="invalid_init_data")
+
+    secret_key = hmac.new(b"WebAppData", settings.telegram_token.encode("utf-8"), hashlib.sha256).digest()
+    data_check_string = "\n".join(f"{key}={parsed[key]}" for key in sorted(parsed))
+    expected_hash = hmac.new(secret_key, data_check_string.encode("utf-8"), hashlib.sha256).hexdigest()
+    if not hmac.compare_digest(expected_hash, received_hash):
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="invalid_init_data")
 
     try:

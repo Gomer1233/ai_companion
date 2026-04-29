@@ -1,8 +1,11 @@
 from __future__ import annotations
 
+import hashlib
+import hmac
 import json
 import time
 from pathlib import Path
+from urllib.parse import quote
 
 from fastapi.testclient import TestClient
 
@@ -12,6 +15,8 @@ from src.app.settings import Settings
 from src.core.contracts import DeferredJob, JobStatus, JobType, UserRef
 from src.db.migrations import migrate_database
 from src.db.repositories import SQLiteRepositories
+
+_INIT_DATA_SAFE_CHARS = '{}":,'
 
 
 def _make_settings(tmp_path: Path, **env: str) -> Settings:
@@ -37,21 +42,36 @@ def _make_client(tmp_path: Path, **env: str) -> tuple[TestClient, AppDependencie
     return TestClient(create_app(deps)), deps
 
 
-def _telegram_init_data(*, user_id: int, auth_date: int | None = None) -> str:
+def _sign_telegram_init_data(*, telegram_token: str, fields: dict[str, str]) -> str:
+    secret_key = hmac.new(b"WebAppData", telegram_token.encode("utf-8"), hashlib.sha256).digest()
+    data_check_string = "\n".join(f"{key}={fields[key]}" for key in sorted(fields))
+    signature = hmac.new(secret_key, data_check_string.encode("utf-8"), hashlib.sha256).hexdigest()
+    pairs = [f"{key}={quote(value, safe=_INIT_DATA_SAFE_CHARS)}" for key, value in fields.items()]
+    pairs.append(f"hash={signature}")
+    return "&".join(pairs)
+
+
+def _telegram_init_data(*, telegram_token: str, user_id: int, auth_date: int | None = None) -> str:
     issued = int(time.time()) if auth_date is None else auth_date
     user_json = json.dumps({"id": user_id, "first_name": "Test"}, separators=(",", ":"))
-    return f"auth_date={issued}&user={user_json}"
+    return _sign_telegram_init_data(
+        telegram_token=telegram_token,
+        fields={"auth_date": str(issued), "user": user_json},
+    )
 
 
-def _issue_token(client: TestClient, user_id: int) -> str:
-    response = client.post("/api/session/telegram", json={"init_data": _telegram_init_data(user_id=user_id)})
+def _issue_token(client: TestClient, telegram_token: str, user_id: int) -> str:
+    response = client.post(
+        "/api/session/telegram",
+        json={"init_data": _telegram_init_data(telegram_token=telegram_token, user_id=user_id)},
+    )
     assert response.status_code == 200
     return response.json()["access_token"]
 
 
 def test_protected_api_requires_bearer_and_returns_session_identity(tmp_path: Path) -> None:
-    client, _ = _make_client(tmp_path)
-    token = _issue_token(client, 201)
+    client, deps = _make_client(tmp_path)
+    token = _issue_token(client, deps.settings.telegram_token, 201)
 
     unauthorized = client.get("/api/me")
     response = client.get("/api/me", headers={"Authorization": f"Bearer {token}"})
@@ -76,8 +96,8 @@ def test_protected_api_rejects_expired_session(tmp_path: Path) -> None:
 
 
 def test_characters_entitlements_and_usage_are_backend_owned(tmp_path: Path) -> None:
-    client, _ = _make_client(tmp_path)
-    token = _issue_token(client, 203)
+    client, deps = _make_client(tmp_path)
+    token = _issue_token(client, deps.settings.telegram_token, 203)
     headers = {"Authorization": f"Bearer {token}"}
 
     characters = client.get("/api/characters", headers=headers)
@@ -94,8 +114,8 @@ def test_characters_entitlements_and_usage_are_backend_owned(tmp_path: Path) -> 
 
 def test_jobs_endpoint_is_owner_only(tmp_path: Path) -> None:
     client, deps = _make_client(tmp_path)
-    owner_token = _issue_token(client, 204)
-    other_token = _issue_token(client, 205)
+    owner_token = _issue_token(client, deps.settings.telegram_token, 204)
+    other_token = _issue_token(client, deps.settings.telegram_token, 205)
     owner_ref = UserRef("204")
     conversation = deps.repositories.ensure_default_conversation(owner_ref)
     now_ts = int(time.time())
