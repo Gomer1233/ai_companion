@@ -18,6 +18,7 @@ Move alpha production persistence from SQLite to Supabase Postgres with a one-wa
 2. Apply `src/db/postgres_schema.py` `POSTGRES_SCHEMA_SQL`.
 3. Apply the least-privilege grants from `POSTGRES_LEAST_PRIVILEGE_SQL` after replacing the database and role names.
 4. Verify the app role can `SELECT`, `INSERT`, `UPDATE`, and `DELETE` only on the runtime tables and cannot create/drop schema objects.
+5. Do not apply schema DDL from Railway startup; `DATABASE_URL` is for the non-owner app role only.
 
 ## Data Export
 
@@ -30,8 +31,10 @@ Move alpha production persistence from SQLite to Supabase Postgres with a one-wa
    - mode state and mode locks
    - jobs
    - events
+   - profile/settings state
    - relationship state
    - sessions
+   - monetization tables, when present in the source snapshot
 4. Preserve original `user_id`, `conversation_ref`, `created_at`, and `updated_at` values.
 
 ## Import

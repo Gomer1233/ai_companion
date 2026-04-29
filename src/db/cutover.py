@@ -2,21 +2,70 @@ from __future__ import annotations
 
 import sqlite3
 from dataclasses import dataclass
+from time import time
 from typing import Any
 
-from src.core.contracts import ConversationRef, DeferredJob, JobStatus, JobType, UserRef
 
-
-CUTOVER_TABLES = (
+SOURCE_CUTOVER_TABLES = (
+    "users",
+    "telegram_accounts",
+    "user_profile",
+    "user_settings",
     "conversations",
+    "messages",
     "user_messages",
+    "mode_state",
+    "mode_lock",
+    "mode_locks",
     "conversation_mode_state",
     "conversation_mode_lock",
+    "photo_gate",
     "conversation_photo_gate",
+    "events",
+    "user_events",
+    "relationship_state",
     "conversation_relationship_state",
     "jobs",
     "sessions",
+    "plans",
+    "entitlements",
+    "usage_counters",
+    "access_grants",
 )
+
+IMPORT_TABLE_ORDER = (
+    "users",
+    "telegram_accounts",
+    "user_profile",
+    "user_settings",
+    "plans",
+    "conversations",
+    "messages",
+    "user_messages",
+    "mode_state",
+    "mode_lock",
+    "mode_locks",
+    "conversation_mode_state",
+    "conversation_mode_lock",
+    "photo_gate",
+    "conversation_photo_gate",
+    "events",
+    "user_events",
+    "relationship_state",
+    "conversation_relationship_state",
+    "sessions",
+    "jobs",
+    "entitlements",
+    "usage_counters",
+    "access_grants",
+)
+
+IDENTITY_COLUMNS = {
+    "messages": {"id"},
+    "user_messages": {"id"},
+    "events": {"id"},
+    "user_events": {"id"},
+}
 
 
 @dataclass(frozen=True, slots=True)
@@ -33,12 +82,20 @@ def export_sqlite_snapshot(db_path: str) -> CutoverSnapshot:
     conn = sqlite3.connect(db_path)
     conn.row_factory = sqlite3.Row
     try:
-        tables = {table_name: _select_all(conn, table_name) for table_name in CUTOVER_TABLES if _table_exists(conn, table_name)}
+        tables = {
+            table_name: _select_all(conn, table_name)
+            for table_name in SOURCE_CUTOVER_TABLES
+            if _table_exists(conn, table_name)
+        }
     finally:
         conn.close()
 
     user_ids = _collect_user_ids(tables)
-    tables["users"] = [{"user_id": user_id} for user_id in sorted(user_ids)]
+    tables["users"] = _normalized_user_rows(tables.get("users", []), user_ids, tables)
+    if not tables.get("telegram_accounts"):
+        tables["telegram_accounts"] = _derived_telegram_accounts(tables["users"])
+    if tables.get("mode_lock") and not tables.get("mode_locks"):
+        tables["mode_locks"] = [dict(row) for row in tables["mode_lock"]]
     return CutoverSnapshot(tables=tables)
 
 
@@ -52,108 +109,16 @@ def snapshot_counts(snapshot: CutoverSnapshot) -> dict[str, int]:
 
 def import_snapshot_to_repositories(snapshot: CutoverSnapshot, repositories) -> CutoverImportResult:
     counts: dict[str, int] = {}
-
-    for row in snapshot.tables.get("conversations", []):
-        user_ref = UserRef(str(row["user_id"]))
-        conversation_ref = ConversationRef(str(row["conversation_ref"]))
-        if bool(int(row.get("is_default") or 0)):
-            repositories.ensure_default_conversation(user_ref, active_mode=str(row.get("active_mode") or "basic"))
-        else:
-            repositories.create_conversation(
-                user_ref,
-                active_mode=str(row.get("active_mode") or "basic"),
-                is_default=False,
-                conversation_ref=conversation_ref,
-            )
-        repositories.set_active_mode(user_ref, conversation_ref, str(row.get("active_mode") or "basic"))
-        counts["conversations"] = counts.get("conversations", 0) + 1
-
-    for row in snapshot.tables.get("user_messages", []):
-        repositories.append_history(
-            UserRef(str(row["user_id"])),
-            ConversationRef(str(row["conversation_ref"])),
-            str(row.get("mode") or "basic"),
-            str(row["role"]),
-            str(row["content"]),
-            created_at=int(row.get("created_at") or 0),
-        )
-        counts["user_messages"] = counts.get("user_messages", 0) + 1
-
-    for row in snapshot.tables.get("conversation_mode_state", []):
-        repositories.save_mode_state(
-            UserRef(str(row["user_id"])),
-            ConversationRef(str(row["conversation_ref"])),
-            str(row["mode"]),
-            _decode_state(row.get("state_json")),
-        )
-        counts["conversation_mode_state"] = counts.get("conversation_mode_state", 0) + 1
-
-    for row in snapshot.tables.get("conversation_mode_lock", []):
-        user_ref = UserRef(str(row["user_id"]))
-        conversation_ref = ConversationRef(str(row["conversation_ref"]))
-        mode = str(row["mode"])
-        if bool(int(row.get("locked") or 0)):
-            repositories.lock_mode(user_ref, conversation_ref, mode, reason=str(row.get("reason") or ""))
-        else:
-            repositories.unlock_mode(user_ref, conversation_ref, mode)
-        counts["conversation_mode_lock"] = counts.get("conversation_mode_lock", 0) + 1
-
-    for row in snapshot.tables.get("conversation_photo_gate", []):
-        repositories.upsert_photo_gate(
-            UserRef(str(row["user_id"])),
-            ConversationRef(str(row["conversation_ref"])),
-            {
-                "score": int(row.get("score") or 0),
-                "attempts": int(row.get("attempts") or 0),
-                "last_ask_ts": int(row.get("last_ask_ts") or 0),
-                "cooldown_until_ts": int(row.get("cooldown_until_ts") or 0),
-                "awaiting_context": int(row.get("awaiting_context") or 0),
-                "context_asked_ts": int(row.get("context_asked_ts") or 0),
-                "awaiting_image_prompt": int(row.get("awaiting_image_prompt") or 0),
-                "image_cooldown_until_ts": int(row.get("image_cooldown_until_ts") or 0),
-            },
-        )
-        counts["conversation_photo_gate"] = counts.get("conversation_photo_gate", 0) + 1
-
-    for row in snapshot.tables.get("conversation_relationship_state", []):
-        repositories.save_relationship_state(
-            UserRef(str(row["user_id"])),
-            ConversationRef(str(row["conversation_ref"])),
-            str(row["mode"]),
-            _decode_state(row.get("state_json")),
-        )
-        counts["conversation_relationship_state"] = counts.get("conversation_relationship_state", 0) + 1
-
-    for row in snapshot.tables.get("sessions", []):
-        repositories.create_session(
-            UserRef(str(row["user_id"])),
-            issued_at=int(row["issued_at"]),
-            expires_at=int(row["expires_at"]),
-            session_token=str(row["session_token"]),
-        )
-        if int(row.get("last_seen_at") or row["issued_at"]) != int(row["issued_at"]):
-            repositories.touch_session(str(row["session_token"]), last_seen_at=int(row["last_seen_at"]))
-        counts["sessions"] = counts.get("sessions", 0) + 1
-
-    for row in snapshot.tables.get("jobs", []):
-        repositories.create_job(
-            DeferredJob(
-                job_id=str(row["job_id"]),
-                user_ref=UserRef(str(row["user_id"])),
-                conversation_ref=ConversationRef(str(row["conversation_ref"])),
-                mode=str(row["mode"]),
-                job_type=JobType(str(row["job_type"])),
-                status=JobStatus(str(row["status"])),
-                progress=int(row.get("progress") or 0),
-                error_code=row.get("error_code"),
-                result_ref=row.get("result_ref"),
-                created_at=int(row.get("created_at") or 0),
-                updated_at=int(row.get("updated_at") or 0),
-            )
-        )
-        counts["jobs"] = counts.get("jobs", 0) + 1
-
-    counts["users"] = len(snapshot.tables.get("users", []))
+    conn = repositories._connect()
+    try:
+        for table_name in IMPORT_TABLE_ORDER:
+            rows = snapshot.tables.get(table_name, [])
+            if not rows or not _target_table_exists(conn, table_name):
+                continue
+            counts[table_name] = _insert_rows(conn, table_name, rows)
+        conn.commit()
+    finally:
+        conn.close()
     return CutoverImportResult(imported_counts=counts)
 
 
@@ -179,10 +144,125 @@ def _collect_user_ids(tables: dict[str, list[dict[str, Any]]]) -> set[int]:
     return user_ids
 
 
-def _decode_state(value: Any) -> dict[str, Any]:
-    import json
+def _normalized_user_rows(
+    existing_rows: list[dict[str, Any]],
+    user_ids: set[int],
+    tables: dict[str, list[dict[str, Any]]],
+) -> list[dict[str, Any]]:
+    timestamp_bounds = _user_timestamp_bounds(tables)
+    rows_by_user: dict[int, dict[str, Any]] = {}
+    for row in existing_rows:
+        user_id = int(row["user_id"])
+        created_at, updated_at = timestamp_bounds.get(user_id, _fallback_timestamp_bounds())
+        rows_by_user[user_id] = {
+            "user_id": user_id,
+            "created_at": int(row.get("created_at") or created_at),
+            "updated_at": int(row.get("updated_at") or updated_at),
+        }
 
-    if not value:
-        return {}
-    decoded = json.loads(str(value))
-    return decoded if isinstance(decoded, dict) else {}
+    for user_id in user_ids:
+        if user_id in rows_by_user:
+            continue
+        created_at, updated_at = timestamp_bounds.get(user_id, _fallback_timestamp_bounds())
+        rows_by_user[user_id] = {
+            "user_id": user_id,
+            "created_at": created_at,
+            "updated_at": updated_at,
+        }
+    return [rows_by_user[user_id] for user_id in sorted(rows_by_user)]
+
+
+def _derived_telegram_accounts(user_rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    return [
+        {
+            "telegram_user_id": int(row["user_id"]),
+            "user_id": int(row["user_id"]),
+            "username": "",
+            "first_name": "",
+            "created_at": int(row["created_at"]),
+            "updated_at": int(row["updated_at"]),
+        }
+        for row in user_rows
+    ]
+
+
+def _user_timestamp_bounds(tables: dict[str, list[dict[str, Any]]]) -> dict[int, tuple[int, int]]:
+    bounds: dict[int, tuple[int, int]] = {}
+    timestamp_columns = ("created_at", "updated_at", "ts", "issued_at", "last_seen_at", "expires_at")
+    for rows in tables.values():
+        for row in rows:
+            if row.get("user_id") is None:
+                continue
+            values = [int(row[column]) for column in timestamp_columns if row.get(column) is not None]
+            if not values:
+                continue
+            user_id = int(row["user_id"])
+            current = bounds.get(user_id)
+            row_min = min(values)
+            row_max = max(values)
+            if current is None:
+                bounds[user_id] = (row_min, row_max)
+            else:
+                bounds[user_id] = (min(current[0], row_min), max(current[1], row_max))
+    return bounds
+
+
+def _fallback_timestamp_bounds() -> tuple[int, int]:
+    now_ts = int(time())
+    return now_ts, now_ts
+
+
+def _target_table_exists(conn: Any, table_name: str) -> bool:
+    if isinstance(conn, sqlite3.Connection):
+        return _table_exists(conn, table_name)
+    row = conn.execute(
+        """
+        SELECT EXISTS (
+          SELECT 1
+          FROM information_schema.tables
+          WHERE table_schema='public' AND table_name=?
+        )
+        """,
+        (table_name,),
+    ).fetchone()
+    return bool(row and row[0])
+
+
+def _target_columns(conn: Any, table_name: str) -> list[str]:
+    if isinstance(conn, sqlite3.Connection):
+        return [row[1] for row in conn.execute(f"PRAGMA table_info({_quote_identifier(table_name)})").fetchall()]
+    rows = conn.execute(
+        """
+        SELECT column_name
+        FROM information_schema.columns
+        WHERE table_schema='public' AND table_name=?
+        ORDER BY ordinal_position
+        """,
+        (table_name,),
+    ).fetchall()
+    return [str(row[0]) for row in rows]
+
+
+def _insert_rows(conn: Any, table_name: str, rows: list[dict[str, Any]]) -> int:
+    target_columns = _target_columns(conn, table_name)
+    if not target_columns:
+        return 0
+    source_columns = {column for row in rows for column in row}
+    ignored_columns = IDENTITY_COLUMNS.get(table_name, set())
+    columns = [column for column in target_columns if column in source_columns and column not in ignored_columns]
+    if not columns:
+        return 0
+
+    table_sql = _quote_identifier(table_name)
+    column_sql = ", ".join(_quote_identifier(column) for column in columns)
+    placeholders = ", ".join("?" for _ in columns)
+    sql = f"INSERT INTO {table_sql} ({column_sql}) VALUES ({placeholders}) ON CONFLICT DO NOTHING"
+    for row in rows:
+        conn.execute(sql, tuple(row.get(column) for column in columns))
+    return len(rows)
+
+
+def _quote_identifier(identifier: str) -> str:
+    if not identifier.replace("_", "").isalnum():
+        raise ValueError(f"Unsafe SQL identifier: {identifier}")
+    return f'"{identifier}"'

@@ -14,7 +14,6 @@ def bootstrap_database(settings: Settings, *, include_relationship_state: bool =
     if settings.db_backend == "postgres":
         if not settings.database_url:
             raise RuntimeError("DATABASE_URL is required when DB_BACKEND=postgres")
-        apply_postgres_schema(settings.database_url)
         return
 
     raise RuntimeError(f"Unsupported DB_BACKEND={settings.db_backend}")

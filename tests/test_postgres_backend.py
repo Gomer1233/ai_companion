@@ -52,13 +52,21 @@ def test_postgres_schema_declares_alpha_tables_and_least_privilege_grants() -> N
     required_tables = {
         "users",
         "telegram_accounts",
+        "user_profile",
+        "user_settings",
         "conversations",
         "messages",
+        "user_messages",
         "mode_state",
         "mode_locks",
+        "conversation_mode_state",
+        "conversation_mode_lock",
+        "conversation_photo_gate",
         "jobs",
         "events",
+        "user_events",
         "relationship_state",
+        "conversation_relationship_state",
         "sessions",
         "plans",
         "entitlements",
@@ -70,6 +78,10 @@ def test_postgres_schema_declares_alpha_tables_and_least_privilege_grants() -> N
     for table_name in required_tables:
         assert f"create table if not exists {table_name}" in normalized_schema
         assert f"alter table {table_name} enable row level security" in normalized_schema
+        assert f"drop policy if exists lina_app_rw on {table_name}" in normalized_schema
+        assert f"create policy lina_app_rw on {table_name}" in normalized_schema
+
+    assert "current_user = 'lina_app'" in normalized_schema
 
     normalized_grants = POSTGRES_LEAST_PRIVILEGE_SQL.lower()
     assert "grant connect on database" in normalized_grants
@@ -77,7 +89,7 @@ def test_postgres_schema_declares_alpha_tables_and_least_privilege_grants() -> N
     assert "grant select, insert, update, delete on all tables in schema public" in normalized_grants
 
 
-def test_bootstrap_database_uses_postgres_schema_for_postgres_settings(monkeypatch) -> None:
+def test_bootstrap_database_does_not_apply_owner_schema_for_postgres_settings(monkeypatch) -> None:
     from src.db.bootstrap import bootstrap_database
 
     calls: list[tuple[str, str | None]] = []
@@ -104,7 +116,7 @@ def test_bootstrap_database_uses_postgres_schema_for_postgres_settings(monkeypat
 
     bootstrap_database(settings, include_relationship_state=True)
 
-    assert calls == [("postgres", "postgresql://lina_app:secret@db.example/lina")]
+    assert calls == []
 
 
 def test_bootstrap_database_keeps_sqlite_for_local_settings(monkeypatch) -> None:
@@ -130,3 +142,12 @@ def test_bootstrap_database_keeps_sqlite_for_local_settings(monkeypatch) -> None
     bootstrap_database(settings, include_relationship_state=True)
 
     assert calls == [("sqlite", "local.db", True)]
+
+
+def test_main_relationship_state_path_uses_repositories() -> None:
+    main_source = Path("src/main.py").read_text(encoding="utf-8")
+
+    assert "create_repositories(SETTINGS, include_relationship_state=True" in main_source
+    assert "get_relationship_state(DB_PATH" not in main_source
+    assert "save_relationship_state(DB_PATH" not in main_source
+    assert "reset_relationship_state(DB_PATH" not in main_source

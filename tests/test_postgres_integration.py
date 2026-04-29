@@ -12,7 +12,7 @@ from src.adapters.http.app import create_app
 from src.adapters.http.dependencies import AppDependencies, ReadinessState
 from src.app.settings import Settings
 from src.core.contracts import DeferredJob, JobStatus, JobType, UserRef
-from src.db.bootstrap import bootstrap_database
+from src.db.bootstrap import apply_postgres_schema
 from src.db.cutover import export_sqlite_snapshot, import_snapshot_to_repositories
 from src.db.factory import create_repositories
 from src.db.migrations import migrate_database
@@ -44,7 +44,7 @@ def postgres_settings() -> Settings:
 
 @pytest.fixture()
 def postgres_repo(postgres_settings: Settings):
-    bootstrap_database(postgres_settings, include_relationship_state=True)
+    apply_postgres_schema(postgres_settings.database_url)
     repo = create_repositories(postgres_settings, include_relationship_state=True, history_limit=3)
     assert isinstance(repo, PostgresRepositories)
     yield repo

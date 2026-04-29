@@ -18,7 +18,7 @@
 - `multichannel-core` remains the completed foundation initiative and should not be overwritten to carry alpha launch planning.
 - Alpha launch planning now lives under `docs/current/alpha-launch/`.
 - `ALPHA-002 FastAPI HTTP Adapter` is merged to `main`.
-- `ALPHA-003 Postgres Backend + Cutover Runbook` is implementation-complete on `codex/alpha-003-postgres-cutover` and ready for PR publication/review.
+- `ALPHA-003 Postgres Backend + Cutover Runbook` is under review on `codex/alpha-003-postgres-cutover`; P1 review follow-ups are being addressed on the same branch.
 
 ## Completed
 
@@ -51,6 +51,7 @@
     - `alpha_003_initial_postgres_schema`
     - `alpha_003_enable_public_table_rls`
     - `alpha_003_add_foreign_key_indexes`
+    - `alpha_003_add_app_role_rls_policies`
   - Supabase security advisors reduced from RLS errors to `RLS Enabled No Policy` INFO notices, matching the alpha no-browser-DB stance
   - `TEST_DATABASE_URL`-gated Postgres integration tests passed against `Lina_AI_staging`:
     - `python -m pytest tests/test_postgres_integration.py -q`
@@ -61,10 +62,15 @@
   - expanded `TEST_DATABASE_URL`-gated Postgres integration tests passed against `Lina_AI_staging`:
     - `python -m pytest tests/test_postgres_integration.py -q`
     - result: `3 passed`
+  - P1 review follow-ups added:
+    - Postgres startup no longer runs owner DDL through runtime `DATABASE_URL`
+    - runtime tables now get `lina_app` RLS read/write policies alongside least-privilege grants
+    - whore-mode relationship state now routes through repository storage in Postgres mode
+    - cutover snapshot/import now covers profile/settings/events/Telegram mappings/legacy state/runtime tables and monetization tables when present
 
 ## Next Step
 
-Open and review the `ALPHA-003` PR, then move to `ALPHA-004 Provider Matrix + Explicit Policy Layer` after merge.
+Re-run full verification for the `ALPHA-003` review follow-ups, then update the PR and proceed to merge review.
 
 ## Risks / Notes
 

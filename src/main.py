@@ -37,9 +37,7 @@ from aiogram.types import BufferedInputFile
 from aiogram.types.input_file import FSInputFile
 
 from src.prompts.relationship import (
-    get_relationship_state,
-    save_relationship_state,
-    reset_relationship_state,
+    RelationshipState,
     analyze_user_message,
     update_relationship_from_analysis,
     check_ghosting,
@@ -192,7 +190,7 @@ JUDGE_MAX_TOKENS = int(os.getenv("JUDGE_MAX_TOKENS", "220"))
 # Сколько сообщений хранить (user+assistant вместе). Например 12 = 6 реплик туда-обратно.
 HISTORY_LIMIT = int(os.getenv("HISTORY_LIMIT", "12"))
 
-DB_REPOSITORIES = create_repositories(SETTINGS, history_limit=HISTORY_LIMIT)
+DB_REPOSITORIES = create_repositories(SETTINGS, include_relationship_state=True, history_limit=HISTORY_LIMIT)
 
 
 def _connect_runtime_db():
@@ -203,6 +201,19 @@ def _repo_refs(user_id: int):
     user_ref = legacy_user_ref(user_id)
     conversation = DB_REPOSITORIES.ensure_default_conversation(user_ref)
     return user_ref, conversation.conversation_ref
+
+
+def _load_relationship_state(user_id: int, mode: str = "whore") -> RelationshipState:
+    user_ref, conversation_ref = _repo_refs(user_id)
+    data = DB_REPOSITORIES.load_relationship_state(user_ref, conversation_ref, mode)
+    if data is None:
+        return RelationshipState(user_id=user_id, mode=mode)
+    return RelationshipState.from_dict(user_id, mode, data)
+
+
+def _save_relationship_state(state: RelationshipState) -> None:
+    user_ref, conversation_ref = _repo_refs(state.user_id)
+    DB_REPOSITORIES.save_relationship_state(user_ref, conversation_ref, state.mode, state.to_dict())
 
 MODEL_PRESETS = [
     "openai/gpt-4o-mini",  # Starting at $0.15/M input tokens Starting at $0.60/M output tokens
@@ -1793,9 +1804,6 @@ async def _reset_current_mode(user_id: int, mode: str, *, note: str, chat_id: in
     user_ref, conversation_ref = _repo_refs(user_id)
     DB_REPOSITORIES.reset_mode_in_conversation(user_ref, conversation_ref, mode)
 
-    if mode == "whore":
-        reset_relationship_state(DB_PATH, user_id, mode)
-
     return mode
 
 
@@ -1942,7 +1950,7 @@ async def cmd_status(message: types.Message):
         await message.answer("Команда работает только в режиме Шлюшка")
         return
 
-    rel_state = get_relationship_state(DB_PATH, user_id, mode)
+    rel_state = _load_relationship_state(user_id, mode)
     status_text = (
         "Статус отношений с Ликой\n\n"
         f"Имя: {rel_state.user_name or 'неизвестно'}\n"
@@ -2296,8 +2304,6 @@ async def cmd_reset(message: types.Message):
     set_mode_picked(user_id, False)
     IMAGE_JOBS.pop(user_id, None)
 
-    reset_relationship_state(DB_PATH, user_id, "whore")
-
     await message.answer(
         "\u0421\u0431\u0440\u043e\u0441 \u0441\u0434\u0435\u043b\u0430\u043b.\n"
         "\u0420\u0435\u0436\u0438\u043c: `basic`\n"
@@ -2547,14 +2553,14 @@ async def on_text(message: types.Message):
     memory_block = format_state_block(state)
     
     if mode == "whore":
-        rel_state = get_relationship_state(DB_PATH, user_id, mode)
+        rel_state = _load_relationship_state(user_id, mode)
         ghost_mood = check_ghosting(rel_state)
         if ghost_mood:
             rel_state.mood = ghost_mood
 
         analysis = analyze_user_message(user_text, rel_state)
         rel_state = update_relationship_from_analysis(rel_state, analysis)
-        save_relationship_state(DB_PATH, rel_state)
+        _save_relationship_state(rel_state)
         system_base = build_lika_system_prompt(rel_state)
     else:
         system_base = MODE_TO_SYSTEM_PROMPT.get(mode)

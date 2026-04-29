@@ -39,6 +39,32 @@ def test_cutover_snapshot_exports_runtime_tables_from_sqlite_fixture(tmp_path) -
             updated_at=now_ts,
         )
     )
+    conn = sqlite3.connect(source_db)
+    try:
+        conn.execute(
+            """
+            INSERT INTO user_profile(user_id, preferred_name, preferred_title, mode, chat_locked, lock_reason, mode_picked)
+            VALUES(?, 'Lina', 'alpha', 'chef', 1, 'manual', 1)
+            """,
+            (int(user_ref.value),),
+        )
+        conn.execute(
+            """
+            INSERT INTO user_settings(user_id, model, image_model, image_provider)
+            VALUES(?, 'openai/gpt-4o-mini', 'image-model', 'openrouter')
+            """,
+            (int(user_ref.value),),
+        )
+        conn.execute(
+            """
+            INSERT INTO user_events(ts, user_id, chat_id, username, first_name, event_type, mode, ok, note, conversation_ref)
+            VALUES(?, ?, 71001, 'tester', 'Test', 'mode_switch', 'chef', 1, 'cutover', ?)
+            """,
+            (now_ts, int(user_ref.value), conversation.conversation_ref.value),
+        )
+        conn.commit()
+    finally:
+        conn.close()
 
     snapshot = export_sqlite_snapshot(str(source_db))
 
@@ -50,10 +76,16 @@ def test_cutover_snapshot_exports_runtime_tables_from_sqlite_fixture(tmp_path) -
         "conversation_relationship_state": 1,
         "jobs": 1,
         "sessions": 1,
+        "telegram_accounts": 1,
+        "user_events": 1,
         "user_messages": 1,
+        "user_profile": 1,
+        "user_settings": 1,
         "users": 1,
     }
-    assert snapshot.tables["users"] == [{"user_id": 71001}]
+    assert snapshot.tables["users"][0]["user_id"] == 71001
+    assert snapshot.tables["users"][0]["created_at"] == now_ts
+    assert snapshot.tables["telegram_accounts"][0]["telegram_user_id"] == 71001
 
 
 def test_cutover_rehearsal_imports_snapshot_into_repository_target(tmp_path) -> None:
@@ -87,7 +119,8 @@ def test_cutover_rehearsal_imports_snapshot_into_repository_target(tmp_path) -> 
     result = import_snapshot_to_repositories(snapshot, target)
 
     imported_conversation = target.load_conversation(user_ref, conversation.conversation_ref)
-    assert result.imported_counts["users"] == 1
+    assert result.imported_counts["conversations"] == 1
+    assert snapshot.tables["users"][0]["user_id"] == 71002
     assert imported_conversation is not None
     assert imported_conversation.active_mode == "whore"
     assert target.load_history(user_ref, conversation.conversation_ref, "whore") == [
@@ -102,5 +135,6 @@ def test_cutover_rehearsal_imports_snapshot_into_repository_target(tmp_path) -> 
     conn = sqlite3.connect(target_db)
     try:
         assert conn.execute("SELECT COUNT(*) FROM conversations WHERE user_id=71002").fetchone()[0] == 1
+        assert conn.execute("SELECT COUNT(*) FROM user_messages WHERE user_id=71002").fetchone()[0] == 1
     finally:
         conn.close()

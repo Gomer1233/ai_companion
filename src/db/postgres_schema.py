@@ -284,6 +284,47 @@ ALTER TABLE access_grants ENABLE ROW LEVEL SECURITY;
 """
 
 
+POSTGRES_APP_ROLE = "lina_app"
+
+POSTGRES_RUNTIME_TABLES = (
+    "users",
+    "telegram_accounts",
+    "user_profile",
+    "user_settings",
+    "conversations",
+    "messages",
+    "user_messages",
+    "mode_state",
+    "conversation_mode_state",
+    "mode_locks",
+    "conversation_mode_lock",
+    "conversation_photo_gate",
+    "jobs",
+    "events",
+    "user_events",
+    "relationship_state",
+    "conversation_relationship_state",
+    "sessions",
+    "plans",
+    "entitlements",
+    "usage_counters",
+    "access_grants",
+)
+
+POSTGRES_APP_ROLE_POLICY_SQL = "\n".join(
+    f"""
+DROP POLICY IF EXISTS lina_app_rw ON {table_name};
+CREATE POLICY lina_app_rw ON {table_name}
+  FOR ALL
+  USING (current_user = '{POSTGRES_APP_ROLE}')
+  WITH CHECK (current_user = '{POSTGRES_APP_ROLE}');
+""".strip()
+    for table_name in POSTGRES_RUNTIME_TABLES
+)
+
+POSTGRES_SCHEMA_SQL = f"{POSTGRES_SCHEMA_SQL}\n{POSTGRES_APP_ROLE_POLICY_SQL}\n"
+
+
 POSTGRES_LEAST_PRIVILEGE_SQL = """
 -- Run as a Supabase/Postgres owner role after replacing placeholders.
 GRANT CONNECT ON DATABASE lina TO lina_app;
