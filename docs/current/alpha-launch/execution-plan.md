@@ -16,6 +16,7 @@
 
 - Один backend truth, один Telegram bot launcher, один access-policy слой.
 - Бот остаётся `bot-first`; Mini App не забирает основной чат в alpha v1.
+- User-facing web surfaces use the `Lina Midnight Channel UI` visual contract from `docs/adr/0001-lina-midnight-channel-ui.md`; Mini App is the first implementation, and future standalone Web should extend the same direction.
 - Railway хостит Python backend service: bot runtime + HTTP API.
 - Vercel хостит только Mini App frontend.
 - Mini App ходит напрямую: `browser -> Railway API`.

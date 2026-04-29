@@ -8,6 +8,7 @@ Ship the Telegram Mini App frontend on Vercel as a thin UI over the Railway back
 
 - create Next.js Mini App frontend
 - implement catalog, profile, usage/limits, plan/access state, locked premium states, onboarding, and 18+ consent UX
+- implement the `Lina Midnight Channel UI` direction from `docs/adr/0001-lina-midnight-channel-ui.md`
 - integrate backend session exchange and silent re-auth on `401`
 - add open-app entry point from the bot
 - keep frontend thin over Railway API responses
@@ -30,6 +31,7 @@ Ship the Telegram Mini App frontend on Vercel as a thin UI over the Railway back
 - direct browser -> Railway API path
 - backend session exchange and re-auth
 - catalog and access-state parity with the bot
+- visual/state parity with the `Lina Midnight Channel UI` contract without frontend-owned entitlement decisions
 - no frontend-owned entitlement logic
 
 ## Merge Criteria
@@ -37,4 +39,5 @@ Ship the Telegram Mini App frontend on Vercel as a thin UI over the Railway back
 - Mini App uses backend-issued session tokens only
 - UI reflects backend access state exactly
 - explicit UI remains gated by backend consent state
+- Mini App uses the channel-guide visual model from `docs/adr/0001-lina-midnight-channel-ui.md`
 - Vercel frontend stays a thin client over Railway API
