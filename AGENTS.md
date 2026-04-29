@@ -42,3 +42,11 @@ PR documentation rules:
 - `pr-backlog.md` defines PR order and status.
 - `prs/<pr-id>/brief.md` defines the scope of one PR.
 - `prs/<pr-id>/tasks.md` is only an execution checklist, not a source of architectural truth.
+
+Git worktrees:
+
+- Do not create a new worktree for every task by default.
+- Use the main repository working directory for normal sequential work.
+- Create a separate worktree only when parallel branch work or isolation is clearly needed.
+- Place worktrees next to the main repository, not inside it.
+- Remove temporary worktrees after the related branch is merged or no longer needed.
