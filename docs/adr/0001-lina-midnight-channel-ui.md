@@ -72,6 +72,18 @@ The main Mini App surface should be structured like a channel guide:
 
 The UI should remain app-first. It must not become a marketing landing page.
 
+## Visual Calibration
+
+The approved visual target is a dense mobile channel-guide screen, not a loose mood board. ALPHA-008 should preserve these first-screen signals:
+
+- a branded OSD header with `Lina`, channel/time/recording-style system indicators, and a compact utility/menu affordance
+- an access/status panel near the top with pass/plan, usage meter, 18+ state, next action, and signal/system widgets
+- a `channels` catalog as the primary content model, using rows/cards with thumbnail, persona title, short description, access badges, and a clear action
+- a restricted 18+ row/card that reads as a blocked channel, with red state, lock indicator, and age-confirmation action
+- a bottom navigation bar for `Home`, `Chats`, `Access`, and `Profile` style destinations
+
+This calibration is directional, not pixel-perfect. It defines composition, density, state language, and broadcast UI texture. Implementation may adapt spacing, typography, and exact labels for Telegram Mini App constraints.
+
 ## Palette Direction
 
 The palette should be restrained and broadcast-oriented:
