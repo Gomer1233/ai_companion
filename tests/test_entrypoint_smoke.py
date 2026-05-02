@@ -1,9 +1,12 @@
 from __future__ import annotations
 
 import sqlite3
+from types import SimpleNamespace
 from unittest.mock import AsyncMock
 
 import pytest
+
+from tests.support import FakeMessage
 
 
 def index_exists(db_path: str, index_name: str) -> bool:
@@ -59,6 +62,85 @@ def test_supported_image_provider_configs_import(module_loader, provider, extra_
     module = module_loader("src.main", env={"IMAGE_BACKEND_PROVIDER": provider, **extra_env})
 
     assert module.IMAGE_BACKEND_PROVIDER == provider
+
+
+@pytest.mark.asyncio
+async def test_explicit_image_flow_rejects_openai_provider(module_loader):
+    module = module_loader(
+        "src.main",
+        env={"IMAGE_BACKEND_PROVIDER": "openai", "OPENAI_API_KEY": "oa-test-key"},
+    )
+
+    with pytest.raises(RuntimeError, match="provider_not_allowed"):
+        await module.generate_image_backend("prompt", mode="whore")
+
+
+def test_legacy_openai_image_provider_import_still_works(module_loader):
+    module = module_loader(
+        "src.main",
+        env={"IMAGE_BACKEND_PROVIDER": "openai", "OPENAI_API_KEY": "oa-test-key"},
+    )
+
+    assert module.IMAGE_BACKEND_PROVIDER == "openai"
+
+
+@pytest.mark.asyncio
+async def test_explicit_prompt_translation_rejects_openai_engine_before_network(module_loader):
+    module = module_loader(
+        "src.main",
+        env={
+            "PROMPT_TRANSLATION_ENABLED": "1",
+            "PROMPT_TRANSLATION_ENGINE": "openai",
+            "TRANSLATION_MODEL": "gpt-4o-mini",
+        },
+    )
+
+    with pytest.raises(RuntimeError, match="Explicit translation blocked"):
+        await module.maybe_translate_prompt("modelslab", "привет", mode="whore")
+
+
+@pytest.mark.asyncio
+async def test_explicit_prompt_translation_uses_openrouter_engine(module_loader, monkeypatch):
+    module = module_loader(
+        "src.main",
+        env={
+            "PROMPT_TRANSLATION_ENABLED": "1",
+            "PROMPT_TRANSLATION_ENGINE": "openrouter",
+            "TRANSLATION_MODEL": "x-ai/grok-4.1-fast",
+        },
+    )
+    translator = AsyncMock(return_value="hello")
+    monkeypatch.setattr(module, "call_openrouter", translator)
+
+    translated = await module.maybe_translate_prompt("modelslab", "привет", mode="whore")
+
+    assert translated == "hello"
+    translator.assert_awaited_once()
+
+
+@pytest.mark.asyncio
+async def test_explicit_text_flow_rejects_blocked_policy_before_openrouter(
+    module_loader,
+    mark_mode_picked,
+    monkeypatch,
+):
+    module = module_loader("src.main")
+    module.init_db()
+    mark_mode_picked(module, 1, mode="whore")
+    monkeypatch.setattr(module, "keep_typing", AsyncMock())
+    llm = AsyncMock(return_value=("blocked bypass", "stop", {"total_tokens": 1}))
+    monkeypatch.setattr(module, "call_openrouter_with_meta", llm)
+
+    class BlockingPolicy:
+        def authorize_explicit(self, request):
+            return SimpleNamespace(allowed=False, reasons=("provider_not_allowed",))
+
+    monkeypatch.setattr(module, "ACCESS_POLICY", BlockingPolicy())
+
+    with pytest.raises(RuntimeError, match="Explicit text request blocked"):
+        await module.on_text(FakeMessage("hello"))
+
+    llm.assert_not_awaited()
 
 
 def test_chef_submode_keyboard_uses_readable_labels(module_loader):
