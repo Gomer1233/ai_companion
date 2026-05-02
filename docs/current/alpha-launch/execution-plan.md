@@ -23,7 +23,11 @@
 - Mini App ходит напрямую: `browser -> Railway API`.
 - Python HTTP adapter живёт в `src/adapters/http/**`.
 - HTTP stack = FastAPI.
-- Manual grants используются вместо payment automation в alpha v1.
+- Automated payment fulfillment входит в alpha v1 monetization scope.
+- Manual grants остаются операторским fallback/support path, но не основным sales flow.
+- Alpha payment providers:
+  - Telegram Stars для нативной Telegram digital-goods оплаты;
+  - T-Bank/SBP/T-Pay только для external/off-Telegram checkout, не как in-bot digital-goods payment provider.
 - Explicit 18+ входит в alpha v1.
 - Explicit alpha critical path = `text + image`.
 - `audio` и `vision` не входят в explicit critical path alpha v1.
@@ -330,11 +334,16 @@ Source of truth для `GET /api/*` живёт только в Python backend se
 - Сделать explicit 18+ consent частью backend-state, а не только UI-экрана.
 - И bot, и Mini App проходят через один `AccessPolicyService`.
 - Ввести trial state и usage counters.
+- Ввести automated payment order lifecycle и idempotent entitlement fulfillment.
+- Поддержать Telegram Stars payment flow.
+- Поддержать обязательный T-Bank/SBP/T-Pay external/off-Telegram checkout flow sandbox-first.
+- Оставить manual grants как operator fallback/support path.
 - Operator flow сделать через закрытые bot-команды:
   - `/grant_access`
   - `/revoke_access`
   - `/user_status`
   - `/usage_status`
+  - `/admin_users`
 
 ### Admin Hardening
 
@@ -348,7 +357,8 @@ Source of truth для `GET /api/*` живёт только в Python backend se
 
 - Bot-first путь не может обойти explicit gate.
 - Free/trial/premium и consent state совпадают в bot и Mini App.
-- Доступ выдаётся только через защищённый operator flow.
+- Paid access выдаётся автоматически после provider-confirmed payment через idempotent fulfillment.
+- Manual grants доступны только через защищённый operator flow как fallback/support path.
 
 ## 7. Job Reliability Before Launch
 

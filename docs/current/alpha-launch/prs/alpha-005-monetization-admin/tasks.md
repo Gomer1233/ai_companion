@@ -1,9 +1,27 @@
 ﻿# Tasks
 
 - [ ] Add backend tier, trial, entitlement, and usage logic.
+- [ ] Encode alpha v1 limits for `free`, `trial`, and `premium`.
+- [ ] Encode purchasable products: `premium_30d` at 499 RUB/500 XTR, `premium_1y` at 1990 RUB/2000 XTR, and `lifetime_premium_100` at 2990 RUB/3000 XTR with a 100-sale cap.
+- [ ] Track daily message and explicit image usage counters.
+- [ ] Add admin-only estimated LLM token cost reporting from logged usage.
+- [ ] Add payment order lifecycle for automated purchase fulfillment.
+- [ ] Implement Telegram Stars purchase flow.
+- [ ] Implement required T-Bank/SBP/T-Pay external/off-Telegram checkout flow sandbox-first with `TBANK_ENV=sandbox|production`; do not present it as an in-bot digital-goods payment provider.
+- [ ] Add repository-level transactional idempotent fulfillment from paid orders to entitlements with a unique order-to-entitlement link.
+- [ ] Add paid-but-not-fulfilled operator visibility and repair path.
+- [ ] Represent refund/cancel states without user-facing refund buttons.
+- [ ] Add durable entitlement revoke state and repository revoke operation for `/revoke_access` and refund/manual revoke support.
 - [ ] Make explicit consent a backend state check.
-- [ ] Implement protected operator bot commands for manual grants.
+- [ ] Add a user-facing bot action for current tariff and remaining limits.
+- [ ] Implement protected operator bot commands for manual grants as support fallback.
+- [ ] Support manual per-user trial grants with custom duration, message limit, and explicit image limit.
+- [ ] Enforce the lifetime 100-user cap across both purchases and manual grants.
+- [ ] Implement `/admin_users` with compact list output, filtering, sorting, and pagination.
 - [ ] Add operator allowlist, audit events, and confirmation guards.
+- [ ] Add tests proving grant, revoke, and fulfill-repair operator actions write audit events.
+- [ ] Add cutover coverage for payment orders, explicit consent, admin audit events, and entitlement revoke state.
 - [ ] Add abuse throttling for sensitive operator actions.
-- [ ] Add access and operator command tests.
-- [ ] Update `docs/current/alpha-launch/status.md` when PR starts and when it finishes.
+- [ ] Define operator-only backend service/API contracts for future Mini App admin UI.
+- [ ] Add access, usage, cost, payment, fulfillment, user status, and operator command tests.
+- [ ] Update `docs/current/alpha-launch/status.md` only after `ALPHA-004` is merged and actual `ALPHA-005` implementation starts; update it again when implementation finishes.
