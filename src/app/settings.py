@@ -99,6 +99,14 @@ class Settings:
     http_session_rate_limit_max_attempts: int
     db_backend: str
     database_url: str
+    tbank_env: str
+    tbank_terminal_key: str
+    tbank_password: str
+    tbank_success_url: str
+    tbank_fail_url: str
+    tbank_notification_url: str
+    tbank_webhook_secret: str
+    operator_telegram_ids: frozenset[int]
 
     @classmethod
     def from_env(
@@ -170,4 +178,16 @@ class Settings:
             http_session_rate_limit_max_attempts=_get_int(source, "HTTP_SESSION_RATE_LIMIT_MAX_ATTEMPTS", 5),
             db_backend=_get_str(source, "DB_BACKEND", "sqlite").lower(),
             database_url=_get_str(source, "DATABASE_URL"),
+            tbank_env=_get_str(source, "TBANK_ENV", "sandbox").lower(),
+            tbank_terminal_key=_get_str(source, "TBANK_TERMINAL_KEY"),
+            tbank_password=_get_str(source, "TBANK_PASSWORD"),
+            tbank_success_url=_get_str(source, "TBANK_SUCCESS_URL"),
+            tbank_fail_url=_get_str(source, "TBANK_FAIL_URL"),
+            tbank_notification_url=_get_str(source, "TBANK_NOTIFICATION_URL"),
+            tbank_webhook_secret=_get_str(source, "TBANK_WEBHOOK_SECRET"),
+            operator_telegram_ids=frozenset(
+                int(value)
+                for value in _get_csv_tuple(source, "OPERATOR_TELEGRAM_IDS")
+                if value.strip()
+            ),
         )

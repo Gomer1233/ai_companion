@@ -7,7 +7,7 @@ from dataclasses import dataclass
 from src.db.connection import connect_sqlite
 
 
-SCHEMA_VERSION = 4
+SCHEMA_VERSION = 5
 
 
 @dataclass(frozen=True, slots=True)
@@ -40,6 +40,11 @@ def migrate_database(db_path: str, *, include_relationship_state: bool = False) 
         if current_version < 4:
             _migration_004_sessions(conn, context)
             _set_schema_version(conn, 4)
+            current_version = 4
+
+        if current_version < 5:
+            _migration_005_monetization_payments(conn, context)
+            _set_schema_version(conn, 5)
 
         conn.commit()
     finally:
@@ -471,6 +476,137 @@ def _migration_004_sessions(conn: sqlite3.Connection, context: MigrationContext)
     )
     conn.execute("CREATE INDEX IF NOT EXISTS idx_sessions_user_id ON sessions(user_id)")
     conn.execute("CREATE INDEX IF NOT EXISTS idx_sessions_expires_at ON sessions(expires_at)")
+
+
+def _migration_005_monetization_payments(conn: sqlite3.Connection, context: MigrationContext) -> None:
+    del context
+    conn.execute(
+        """
+        CREATE TABLE IF NOT EXISTS entitlements (
+          entitlement_id TEXT PRIMARY KEY,
+          user_id INTEGER NOT NULL,
+          plan_id TEXT,
+          tier TEXT NOT NULL,
+          starts_at INTEGER NOT NULL,
+          expires_at INTEGER,
+          status TEXT NOT NULL DEFAULT 'active',
+          source TEXT NOT NULL,
+          created_at INTEGER NOT NULL,
+          revoked_at INTEGER,
+          revoked_by TEXT,
+          revoked_reason TEXT,
+          metadata_json TEXT NOT NULL DEFAULT '{}'
+        )
+        """
+    )
+    for column_name, ddl in {
+        "status": "TEXT NOT NULL DEFAULT 'active'",
+        "revoked_at": "INTEGER",
+        "revoked_by": "TEXT",
+        "revoked_reason": "TEXT",
+        "metadata_json": "TEXT NOT NULL DEFAULT '{}'",
+    }.items():
+        _add_column_if_missing(conn, "entitlements", column_name, ddl)
+    conn.execute("CREATE INDEX IF NOT EXISTS idx_entitlements_user_id ON entitlements(user_id)")
+    conn.execute("CREATE INDEX IF NOT EXISTS idx_entitlements_user_tier ON entitlements(user_id, tier)")
+    conn.execute(
+        """
+        CREATE UNIQUE INDEX IF NOT EXISTS idx_entitlements_payment_source_unique
+        ON entitlements(source)
+        WHERE source LIKE 'payment:%'
+        """
+    )
+
+    conn.execute(
+        """
+        CREATE TABLE IF NOT EXISTS usage_counters (
+          user_id INTEGER NOT NULL,
+          counter_key TEXT NOT NULL,
+          window_start INTEGER NOT NULL,
+          window_end INTEGER NOT NULL,
+          value INTEGER NOT NULL DEFAULT 0,
+          PRIMARY KEY (user_id, counter_key, window_start)
+        )
+        """
+    )
+    conn.execute("CREATE INDEX IF NOT EXISTS idx_usage_counters_user_key ON usage_counters(user_id, counter_key)")
+
+    conn.execute(
+        """
+        CREATE TABLE IF NOT EXISTS access_grants (
+          grant_id TEXT PRIMARY KEY,
+          user_id INTEGER NOT NULL,
+          granted_by TEXT NOT NULL,
+          grant_type TEXT NOT NULL,
+          reason TEXT NOT NULL DEFAULT '',
+          created_at INTEGER NOT NULL,
+          revoked_at INTEGER,
+          metadata_json TEXT NOT NULL DEFAULT '{}'
+        )
+        """
+    )
+    _add_column_if_missing(conn, "access_grants", "metadata_json", "TEXT NOT NULL DEFAULT '{}'")
+    conn.execute("CREATE INDEX IF NOT EXISTS idx_access_grants_user_id ON access_grants(user_id)")
+
+    conn.execute(
+        """
+        CREATE TABLE IF NOT EXISTS admin_audit_events (
+          audit_id TEXT PRIMARY KEY,
+          operator_user_id TEXT NOT NULL,
+          target_user_id INTEGER,
+          target_order_id TEXT,
+          action TEXT NOT NULL,
+          result TEXT NOT NULL,
+          reason TEXT NOT NULL DEFAULT '',
+          created_at INTEGER NOT NULL,
+          metadata_json TEXT NOT NULL DEFAULT '{}'
+        )
+        """
+    )
+
+    conn.execute(
+        """
+        CREATE TABLE IF NOT EXISTS explicit_consent (
+          user_id INTEGER PRIMARY KEY,
+          accepted_at INTEGER NOT NULL,
+          revoked_at INTEGER,
+          source TEXT NOT NULL
+        )
+        """
+    )
+
+    conn.execute(
+        """
+        CREATE TABLE IF NOT EXISTS payment_orders (
+          order_id TEXT PRIMARY KEY,
+          user_id INTEGER NOT NULL,
+          provider TEXT NOT NULL,
+          product_id TEXT NOT NULL,
+          amount_minor INTEGER NOT NULL,
+          currency TEXT NOT NULL,
+          status TEXT NOT NULL,
+          entitlement_id TEXT,
+          provider_payment_id TEXT,
+          provider_payload_json TEXT NOT NULL DEFAULT '{}',
+          created_at INTEGER NOT NULL,
+          paid_at INTEGER,
+          fulfilled_at INTEGER,
+          refunded_at INTEGER,
+          cancelled_at INTEGER,
+          error_code TEXT
+        )
+        """
+    )
+    conn.execute(
+        """
+        CREATE UNIQUE INDEX IF NOT EXISTS idx_payment_orders_entitlement_id_unique
+        ON payment_orders(entitlement_id)
+        WHERE entitlement_id IS NOT NULL
+        """
+    )
+    conn.execute("CREATE INDEX IF NOT EXISTS idx_payment_orders_user_id ON payment_orders(user_id)")
+    conn.execute("CREATE INDEX IF NOT EXISTS idx_payment_orders_status ON payment_orders(status)")
+    conn.execute("CREATE INDEX IF NOT EXISTS idx_payment_orders_provider_payment_id ON payment_orders(provider_payment_id)")
 
 
 def _collect_user_ids(conn: sqlite3.Connection, context: MigrationContext) -> list[int]:

@@ -4,6 +4,7 @@ import sqlite3
 import time
 
 from src.core.contracts import DeferredJob, JobStatus, JobType, UserRef
+from src.core.monetization import PaymentOrder, PaymentProvider, PaymentStatus, ProductId
 from src.db.cutover import export_sqlite_snapshot, import_snapshot_to_repositories, snapshot_counts
 from src.db.migrations import migrate_database
 from src.db.repositories import SQLiteRepositories
@@ -83,6 +84,15 @@ def test_cutover_snapshot_exports_runtime_tables_from_sqlite_fixture(tmp_path) -
         "user_settings": 1,
         "users": 1,
     }
+    for table_name in (
+        "access_grants",
+        "admin_audit_events",
+        "entitlements",
+        "explicit_consent",
+        "payment_orders",
+        "usage_counters",
+    ):
+        assert table_name in snapshot.tables
     assert snapshot.tables["users"][0]["user_id"] == 71001
     assert snapshot.tables["users"][0]["created_at"] == now_ts
     assert snapshot.tables["telegram_accounts"][0]["telegram_user_id"] == 71001
@@ -100,6 +110,32 @@ def test_cutover_rehearsal_imports_snapshot_into_repository_target(tmp_path) -> 
     source.save_mode_state(user_ref, conversation.conversation_ref, "whore", {"score": 7})
     source.upsert_photo_gate(user_ref, conversation.conversation_ref, {"attempts": 3})
     source.save_relationship_state(user_ref, conversation.conversation_ref, "whore", {"stage": "FLIRTING"})
+    source.upsert_entitlement(
+        entitlement_id="cutover-entitlement",
+        user_ref=user_ref,
+        plan_id="premium_30d",
+        tier="premium",
+        starts_at=now_ts,
+        expires_at=now_ts + 30 * 86_400,
+        source="payment:telegram_stars:cutover-order",
+        created_at=now_ts,
+    )
+    source.set_explicit_consent(user_ref, accepted_at=now_ts, source="telegram")
+    source.create_payment_order(
+        PaymentOrder(
+            order_id="cutover-order",
+            user_ref=user_ref,
+            provider=PaymentProvider.TELEGRAM_STARS,
+            product_id=ProductId.PREMIUM_30D,
+            amount_minor=500,
+            currency="XTR",
+            status=PaymentStatus.FULFILLED,
+            entitlement_id="cutover-entitlement",
+            created_at=now_ts,
+            paid_at=now_ts,
+            fulfilled_at=now_ts,
+        )
+    )
     source.create_session(user_ref, issued_at=now_ts, expires_at=now_ts + 900, session_token="session-import")
     source.create_job(
         DeferredJob(
@@ -129,6 +165,9 @@ def test_cutover_rehearsal_imports_snapshot_into_repository_target(tmp_path) -> 
     assert target.load_mode_state(user_ref, conversation.conversation_ref, "whore") == {"score": 7}
     assert target.get_photo_gate(user_ref, conversation.conversation_ref)["attempts"] == 3
     assert target.load_relationship_state(user_ref, conversation.conversation_ref, "whore") == {"stage": "FLIRTING"}
+    assert target.load_active_entitlements(user_ref, now_ts=now_ts)[0].entitlement_id == "cutover-entitlement"
+    assert target.load_explicit_consent(user_ref).accepted_at == now_ts
+    assert target.load_payment_order("cutover-order").entitlement_id == "cutover-entitlement"
     assert target.load_session("session-import").user_ref == user_ref
     assert target.load_job("job-import").progress == 60
 

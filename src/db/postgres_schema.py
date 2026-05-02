@@ -233,11 +233,20 @@ CREATE TABLE IF NOT EXISTS entitlements (
   tier TEXT NOT NULL,
   starts_at BIGINT NOT NULL,
   expires_at BIGINT,
+  status TEXT NOT NULL DEFAULT 'active',
   source TEXT NOT NULL,
-  created_at BIGINT NOT NULL
+  created_at BIGINT NOT NULL,
+  revoked_at BIGINT,
+  revoked_by TEXT,
+  revoked_reason TEXT,
+  metadata_json TEXT NOT NULL DEFAULT '{}'
 );
 CREATE INDEX IF NOT EXISTS idx_entitlements_user_id ON entitlements(user_id);
 CREATE INDEX IF NOT EXISTS idx_entitlements_plan_id ON entitlements(plan_id);
+CREATE INDEX IF NOT EXISTS idx_entitlements_user_tier ON entitlements(user_id, tier);
+CREATE UNIQUE INDEX IF NOT EXISTS idx_entitlements_payment_source_unique
+  ON entitlements(source)
+  WHERE source LIKE 'payment:%';
 
 CREATE TABLE IF NOT EXISTS usage_counters (
   user_id BIGINT NOT NULL REFERENCES users(user_id),
@@ -255,9 +264,54 @@ CREATE TABLE IF NOT EXISTS access_grants (
   grant_type TEXT NOT NULL,
   reason TEXT NOT NULL DEFAULT '',
   created_at BIGINT NOT NULL,
-  revoked_at BIGINT
+  revoked_at BIGINT,
+  metadata_json TEXT NOT NULL DEFAULT '{}'
 );
 CREATE INDEX IF NOT EXISTS idx_access_grants_user_id ON access_grants(user_id);
+
+CREATE TABLE IF NOT EXISTS admin_audit_events (
+  audit_id TEXT PRIMARY KEY,
+  operator_user_id TEXT NOT NULL,
+  target_user_id BIGINT,
+  target_order_id TEXT,
+  action TEXT NOT NULL,
+  result TEXT NOT NULL,
+  reason TEXT NOT NULL DEFAULT '',
+  created_at BIGINT NOT NULL,
+  metadata_json TEXT NOT NULL DEFAULT '{}'
+);
+
+CREATE TABLE IF NOT EXISTS explicit_consent (
+  user_id BIGINT PRIMARY KEY REFERENCES users(user_id),
+  accepted_at BIGINT NOT NULL,
+  revoked_at BIGINT,
+  source TEXT NOT NULL
+);
+
+CREATE TABLE IF NOT EXISTS payment_orders (
+  order_id TEXT PRIMARY KEY,
+  user_id BIGINT NOT NULL REFERENCES users(user_id),
+  provider TEXT NOT NULL,
+  product_id TEXT NOT NULL,
+  amount_minor BIGINT NOT NULL,
+  currency TEXT NOT NULL,
+  status TEXT NOT NULL,
+  entitlement_id TEXT REFERENCES entitlements(entitlement_id),
+  provider_payment_id TEXT,
+  provider_payload_json TEXT NOT NULL DEFAULT '{}',
+  created_at BIGINT NOT NULL,
+  paid_at BIGINT,
+  fulfilled_at BIGINT,
+  refunded_at BIGINT,
+  cancelled_at BIGINT,
+  error_code TEXT
+);
+CREATE UNIQUE INDEX IF NOT EXISTS idx_payment_orders_entitlement_id_unique
+  ON payment_orders(entitlement_id)
+  WHERE entitlement_id IS NOT NULL;
+CREATE INDEX IF NOT EXISTS idx_payment_orders_user_id ON payment_orders(user_id);
+CREATE INDEX IF NOT EXISTS idx_payment_orders_status ON payment_orders(status);
+CREATE INDEX IF NOT EXISTS idx_payment_orders_provider_payment_id ON payment_orders(provider_payment_id);
 
 ALTER TABLE users ENABLE ROW LEVEL SECURITY;
 ALTER TABLE telegram_accounts ENABLE ROW LEVEL SECURITY;
@@ -281,6 +335,9 @@ ALTER TABLE plans ENABLE ROW LEVEL SECURITY;
 ALTER TABLE entitlements ENABLE ROW LEVEL SECURITY;
 ALTER TABLE usage_counters ENABLE ROW LEVEL SECURITY;
 ALTER TABLE access_grants ENABLE ROW LEVEL SECURITY;
+ALTER TABLE admin_audit_events ENABLE ROW LEVEL SECURITY;
+ALTER TABLE explicit_consent ENABLE ROW LEVEL SECURITY;
+ALTER TABLE payment_orders ENABLE ROW LEVEL SECURITY;
 """
 
 
@@ -309,6 +366,9 @@ POSTGRES_RUNTIME_TABLES = (
     "entitlements",
     "usage_counters",
     "access_grants",
+    "admin_audit_events",
+    "explicit_consent",
+    "payment_orders",
 )
 
 POSTGRES_APP_ROLE_POLICY_SQL = "\n".join(

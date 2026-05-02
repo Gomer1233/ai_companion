@@ -19,7 +19,8 @@
 - Alpha launch planning now lives under `docs/current/alpha-launch/`.
 - `ALPHA-002 FastAPI HTTP Adapter` is merged to `main`.
 - `ALPHA-003 Postgres Backend + Cutover Runbook` is merged to `main`.
-- `ALPHA-004 Provider Matrix + Explicit Policy Layer` is implemented and locally verified on `codex/alpha-004-implementation`; the branch is ready to push for PR review.
+- `ALPHA-004 Provider Matrix + Explicit Policy Layer` is merged to `main`.
+- `ALPHA-005 Monetization Core + Admin Commands` is implemented on `codex/alpha-005-monetization-admin` and ready for review/merge.
 - Post-alpha standalone Web direction is captured as an accepted identity/readiness decision: `docs/adr/0002-user-identity-and-standalone-web-readiness.md`.
 
 ## Completed
@@ -80,10 +81,17 @@
   - explicit-safe judge and prompt-translation defaults
   - request-time guards for explicit image generation and prompt translation
   - focused provider matrix and routing tests
+- `ALPHA-005` now adds:
+  - monetization products, tiers, limits, entitlements, usage counters, explicit consent, and LLM cost estimates
+  - Telegram Stars/XTR purchase helpers and bot handlers for invoice, pre-checkout, and successful payment fulfillment
+  - external/off-Telegram T-Bank checkout signing/webhook support without exposing T-Bank as an in-bot digital-goods payment choice
+  - transactional paid-order fulfillment, paid-but-unfulfilled visibility, repair, refund/cancel states, and durable entitlement revocation
+  - protected operator commands for grant, revoke, fulfill repair, user/usage status, and `/admin_users`
+  - cutover coverage for payment orders, explicit consent, audit events, order-entitlement links, and revoke fields
 
 ## Next Step
 
-Push `codex/alpha-004-implementation`, open PR review for `ALPHA-004 Provider Matrix + Explicit Policy Layer`, then merge it before starting `ALPHA-005 Monetization Core + Admin Commands` from updated `main`.
+Review and merge `ALPHA-005 Monetization Core + Admin Commands`, then start `ALPHA-006 Persona Audit + Launch Allowlist Freeze`.
 
 ## Risks / Notes
 

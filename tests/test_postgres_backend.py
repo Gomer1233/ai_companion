@@ -72,6 +72,9 @@ def test_postgres_schema_declares_alpha_tables_and_least_privilege_grants() -> N
         "entitlements",
         "usage_counters",
         "access_grants",
+        "explicit_consent",
+        "payment_orders",
+        "admin_audit_events",
     }
 
     normalized_schema = POSTGRES_SCHEMA_SQL.lower()
@@ -82,6 +85,9 @@ def test_postgres_schema_declares_alpha_tables_and_least_privilege_grants() -> N
         assert f"create policy lina_app_rw on {table_name}" in normalized_schema
 
     assert "current_user = 'lina_app'" in normalized_schema
+    assert "entitlements.status" not in normalized_schema
+    assert "revoked_at" in normalized_schema
+    assert "entitlement_id" in normalized_schema
 
     normalized_grants = POSTGRES_LEAST_PRIVILEGE_SQL.lower()
     assert "grant connect on database" in normalized_grants

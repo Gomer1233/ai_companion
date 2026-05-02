@@ -31,6 +31,9 @@ SOURCE_CUTOVER_TABLES = (
     "entitlements",
     "usage_counters",
     "access_grants",
+    "explicit_consent",
+    "payment_orders",
+    "admin_audit_events",
 )
 
 IMPORT_TABLE_ORDER = (
@@ -58,6 +61,9 @@ IMPORT_TABLE_ORDER = (
     "entitlements",
     "usage_counters",
     "access_grants",
+    "explicit_consent",
+    "payment_orders",
+    "admin_audit_events",
 )
 
 IDENTITY_COLUMNS = {

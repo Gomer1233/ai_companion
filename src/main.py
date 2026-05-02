@@ -32,6 +32,7 @@ import httpx
 from aiogram import Bot, Dispatcher, types, F
 from aiogram.filters import Command
 from aiogram.types import InlineKeyboardMarkup, InlineKeyboardButton
+from aiogram.types import LabeledPrice
 from aiogram.types import ReplyKeyboardMarkup, KeyboardButton
 from aiogram.types import BufferedInputFile
 from aiogram.types.input_file import FSInputFile
@@ -45,12 +46,22 @@ from src.prompts.relationship import (
 from src.prompts.lika_prompt import build_lika_system_prompt
 from src.adapters.http.app import create_app
 from src.adapters.http.dependencies import AppDependencies, ReadinessState
+from src.adapters.telegram.admin import OperatorThrottle, parse_operator_command, render_admin_user_summaries
+from src.adapters.telegram.payments import (
+    build_stars_buy_keyboard,
+    build_stars_invoice,
+    fulfill_successful_stars_payment,
+    validate_pre_checkout_payload,
+)
 from src.app.settings import Settings
 from src.core.access_policy import (
     AccessPolicyService,
     ExplicitCapability,
     ExplicitPolicyInput,
 )
+from src.core.contracts import UserRef
+from src.core.monetization import AccessDecision, AccessSnapshot, MonetizationService
+from src.core.monetization import PaymentProvider, ProductId, Tier
 from src.core.runtime_helpers import (
     call_openrouter_with_meta as shared_call_openrouter_with_meta,
     chunk_text,
@@ -185,6 +196,8 @@ openrouter_client = httpx.AsyncClient(timeout=OR_TIMEOUT, limits=OR_LIMITS)  # h
 # Get project root directory for DB path
 PROJECT_ROOT = Path(__file__).parent.parent
 SETTINGS = Settings.from_env(project_root=PROJECT_ROOT)
+OPERATOR_TELEGRAM_IDS = SETTINGS.operator_telegram_ids
+OPERATOR_THROTTLE = OperatorThrottle()
 DB_PATH = SETTINGS.bot_db_path
 DEFAULT_MODEL = os.getenv("DEFAULT_MODEL", "openai/gpt-4o-mini")
 
@@ -197,6 +210,40 @@ HISTORY_LIMIT = int(os.getenv("HISTORY_LIMIT", "12"))
 
 DB_REPOSITORIES = create_repositories(SETTINGS, include_relationship_state=True, history_limit=HISTORY_LIMIT)
 ACCESS_POLICY = AccessPolicyService.alpha_default()
+
+
+def is_operator(user_id: int) -> bool:
+    return int(user_id) in OPERATOR_TELEGRAM_IDS
+
+
+def _monetization_service() -> MonetizationService:
+    return MonetizationService(DB_REPOSITORIES)
+
+
+def get_runtime_access_snapshot(user_id: int, *, now_ts: int | None = None) -> AccessSnapshot:
+    return _monetization_service().get_access_snapshot(legacy_user_ref(user_id), now_ts=int(time.time()) if now_ts is None else now_ts)
+
+
+def authorize_runtime_persona(user_id: int, mode: str, *, now_ts: int | None = None) -> AccessDecision:
+    return _monetization_service().can_use_persona(legacy_user_ref(user_id), mode, now_ts=int(time.time()) if now_ts is None else now_ts)
+
+
+def authorize_runtime_explicit_image(user_id: int, *, now_ts: int | None = None) -> AccessDecision:
+    return _monetization_service().can_generate_explicit_image(
+        legacy_user_ref(user_id),
+        now_ts=int(time.time()) if now_ts is None else now_ts,
+    )
+
+
+def record_runtime_message_usage(user_id: int, *, now_ts: int | None = None) -> int:
+    return _monetization_service().record_message_usage(legacy_user_ref(user_id), now_ts=int(time.time()) if now_ts is None else now_ts)
+
+
+def record_runtime_explicit_image_usage(user_id: int, *, now_ts: int | None = None) -> int:
+    return _monetization_service().record_explicit_image_usage(
+        legacy_user_ref(user_id),
+        now_ts=int(time.time()) if now_ts is None else now_ts,
+    )
 
 
 def _connect_runtime_db():
@@ -855,6 +902,19 @@ def get_active_dialog_stats(user_id: int) -> dict[str, int]:
         return {m: int(c) for (m, c) in cur.fetchall() if m}
     finally:
         conn.close()
+
+
+def render_tariff_status(snapshot: AccessSnapshot) -> str:
+    consent = "подтверждено" if snapshot.explicit_consent else "не подтверждено"
+    expires = "никогда" if snapshot.tier_expires_at is None else time.strftime("%Y-%m-%d", time.gmtime(snapshot.tier_expires_at))
+    return (
+        "Остаток по тарифу\n"
+        f"Тариф: {snapshot.effective_tier.value}\n"
+        f"Истекает: {expires}\n"
+        f"Сообщения сегодня: {snapshot.usage.messages_used} / {snapshot.limits.messages_per_day}\n"
+        f"Картинки сегодня: {snapshot.usage.explicit_images_used} / {snapshot.limits.explicit_images_per_day}\n"
+        f"18+: {consent}"
+    )
 
 
 def get_photo_gate(user_id: int) -> Dict[str, int]:
@@ -1782,9 +1842,13 @@ def build_models_keyboard(models: List[str]) -> InlineKeyboardMarkup:
         rows.append([InlineKeyboardButton(text=m, callback_data=f"setmodel:{key}")])
     return InlineKeyboardMarkup(inline_keyboard=rows)
 
+TARIFF_STATUS_BUTTON = "\u041e\u0441\u0442\u0430\u0442\u043e\u043a \u043f\u043e \u0442\u0430\u0440\u0438\u0444\u0443"
+BUY_PREMIUM_BUTTON = "\u041a\u0443\u043f\u0438\u0442\u044c Premium"
+
 MAIN_MENU = ReplyKeyboardMarkup(
     keyboard=[
         [KeyboardButton(text="Режим"), KeyboardButton(text="Сброс всего")],
+        [KeyboardButton(text=TARIFF_STATUS_BUTTON), KeyboardButton(text=BUY_PREMIUM_BUTTON)],
     ],
     resize_keyboard=True,
 )
@@ -1793,6 +1857,7 @@ GEN_MENU = ReplyKeyboardMarkup(
     keyboard=[
         [KeyboardButton(text="Режим"), KeyboardButton(text="Сброс всего"), KeyboardButton(text="Сброс персонажа")],
         [KeyboardButton(text="Хочу фото")],
+        [KeyboardButton(text=TARIFF_STATUS_BUTTON), KeyboardButton(text=BUY_PREMIUM_BUTTON)],
     ],
     resize_keyboard=True,
 )
@@ -1801,6 +1866,7 @@ RAP_MENU = ReplyKeyboardMarkup(
     keyboard=[
         [KeyboardButton(text="Режим"), KeyboardButton(text="Сброс всего"), KeyboardButton(text="Сброс персонажа")],
         [KeyboardButton(text="🎤 Стиль"), KeyboardButton(text="Хочу фото")],
+        [KeyboardButton(text=TARIFF_STATUS_BUTTON), KeyboardButton(text=BUY_PREMIUM_BUTTON)],
     ],
     resize_keyboard=True,
 )
@@ -1820,6 +1886,72 @@ def menu_for(profile: Dict[str, str]) -> ReplyKeyboardMarkup:
 @dp.message(F.text == "Режим")
 async def mode_btn(message: types.Message):
     await cmd_mode(message)
+
+
+@dp.message(F.text == TARIFF_STATUS_BUTTON)
+async def tariff_status_btn(message: types.Message):
+    snapshot = get_runtime_access_snapshot(message.from_user.id)
+    await message.answer(render_tariff_status(snapshot), reply_markup=menu_for(get_user_profile(message.from_user.id)))
+
+
+@dp.message(F.text == BUY_PREMIUM_BUTTON)
+async def buy_premium_btn(message: types.Message):
+    service = _monetization_service()
+    lifetime_available = service.repositories.load_manual_lifetime_entitlement_count() < 100
+    await message.answer(
+        "\u0412 Telegram \u0434\u043b\u044f \u0446\u0438\u0444\u0440\u043e\u0432\u043e\u0433\u043e \u0434\u043e\u0441\u0442\u0443\u043f\u0430 \u0434\u043e\u0441\u0442\u0443\u043f\u043d\u044b Stars/XTR.",
+        reply_markup=build_stars_buy_keyboard(lifetime_available=lifetime_available),
+    )
+
+
+@dp.callback_query(F.data.startswith("buy_stars:"))
+async def cb_buy_stars(callback: types.CallbackQuery):
+    try:
+        product_id = ProductId(callback.data.split(":", 1)[1].strip())
+    except ValueError:
+        await callback.answer("\u041d\u0435\u0438\u0437\u0432\u0435\u0441\u0442\u043d\u044b\u0439 \u0442\u0430\u0440\u0438\u0444", show_alert=True)
+        return
+
+    service = _monetization_service()
+    order = service.create_payment_order(
+        legacy_user_ref(callback.from_user.id),
+        PaymentProvider.TELEGRAM_STARS,
+        product_id,
+        now_ts=int(time.time()),
+    )
+    invoice = build_stars_invoice(order)
+    prices = [LabeledPrice(label=label, amount=amount) for label, amount in invoice.prices]
+    await bot.send_invoice(
+        chat_id=callback.message.chat.id,
+        title=invoice.title,
+        description=invoice.description,
+        payload=invoice.payload,
+        provider_token="",
+        currency=invoice.currency,
+        prices=prices,
+    )
+    await callback.answer()
+
+
+@dp.pre_checkout_query()
+async def on_pre_checkout_query(pre_checkout_query: types.PreCheckoutQuery):
+    decision = validate_pre_checkout_payload(_monetization_service(), pre_checkout_query.invoice_payload)
+    if decision.allowed:
+        await pre_checkout_query.answer(ok=True)
+        return
+    await pre_checkout_query.answer(ok=False, error_message=decision.reason)
+
+
+@dp.message(F.successful_payment)
+async def on_successful_payment(message: types.Message):
+    payment = message.successful_payment
+    fulfill_successful_stars_payment(
+        _monetization_service(),
+        payment.invoice_payload,
+        telegram_payment_charge_id=payment.telegram_payment_charge_id,
+        paid_at=int(time.time()),
+    )
+    await message.answer("\u0414\u043e\u0441\u0442\u0443\u043f \u043e\u043f\u043b\u0430\u0447\u0435\u043d \u0438 \u0430\u043a\u0442\u0438\u0432\u0438\u0440\u043e\u0432\u0430\u043d.")
 
 @dp.message(F.text.in_({"🎤 Стиль", "Стиль"}))
 async def rap_style_btn(message: types.Message):
@@ -2189,6 +2321,13 @@ async def cb_setmode(callback: types.CallbackQuery):
         await callback.answer("Неизвестный режим", show_alert=True)
         return
 
+    access_decision = authorize_runtime_persona(user_id, mode)
+    if not access_decision.allowed:
+        await callback.answer("Требуется другой тариф или подтверждение 18+", show_alert=True)
+        if callback.message:
+            await callback.message.answer("Доступ к этому персонажу сейчас закрыт.")
+        return
+
     # 1) сохраняем режим
     user_ref, conversation_ref = _repo_refs(user_id)
     DB_REPOSITORIES.set_active_mode(user_ref, conversation_ref, mode)
@@ -2378,6 +2517,156 @@ async def cmd_reset(message: types.Message):
         reply_markup=MAIN_MENU,
     )
 
+
+def _operator_user_ref(message: types.Message) -> UserRef:
+    return legacy_user_ref(int(message.from_user.id))
+
+
+async def _deny_non_operator(message: types.Message) -> bool:
+    if is_operator(int(message.from_user.id)):
+        return False
+    await message.answer("\u041a\u043e\u043c\u0430\u043d\u0434\u0430 \u0434\u043e\u0441\u0442\u0443\u043f\u043d\u0430 \u0442\u043e\u043b\u044c\u043a\u043e \u043e\u043f\u0435\u0440\u0430\u0442\u043e\u0440\u0443.")
+    return True
+
+
+async def _require_confirm(message: types.Message, confirmed: bool) -> bool:
+    if confirmed:
+        return False
+    await message.answer("\u0414\u043e\u0431\u0430\u0432\u044c `confirm`, \u0447\u0442\u043e\u0431\u044b \u0432\u044b\u043f\u043e\u043b\u043d\u0438\u0442\u044c \u0434\u0435\u0439\u0441\u0442\u0432\u0438\u0435.", parse_mode="Markdown")
+    return True
+
+
+async def _throttle_sensitive_operator_action(message: types.Message) -> bool:
+    if OPERATOR_THROTTLE.allow(int(message.from_user.id), now_ts=int(time.time())):
+        return False
+    await message.answer("\u0421\u043b\u0438\u0448\u043a\u043e\u043c \u043c\u043d\u043e\u0433\u043e \u043e\u043f\u0435\u0440\u0430\u0442\u043e\u0440\u0441\u043a\u0438\u0445 \u0434\u0435\u0439\u0441\u0442\u0432\u0438\u0439. \u041f\u043e\u0434\u043e\u0436\u0434\u0438 \u043c\u0438\u043d\u0443\u0442\u0443.")
+    return True
+
+
+@dp.message(Command("grant_access"))
+async def cmd_grant_access(message: types.Message):
+    if await _deny_non_operator(message):
+        return
+    command = parse_operator_command(message.text or "")
+    if await _require_confirm(message, command.confirmed):
+        return
+    if await _throttle_sensitive_operator_action(message):
+        return
+    if command.target_user_id is None or command.tier not in {"trial", "premium"}:
+        await message.answer("usage: /grant_access <telegram_user_id> <trial|premium> <days|lifetime> confirm")
+        return
+
+    product_id = None
+    duration_days = command.days
+    tier = Tier(command.tier)
+    if tier == Tier.PREMIUM and duration_days is None:
+        product_id = ProductId.LIFETIME_PREMIUM_100
+    try:
+        entitlement = _monetization_service().grant_manual_access(
+            operator_ref=_operator_user_ref(message),
+            target_ref=legacy_user_ref(command.target_user_id),
+            tier=tier,
+            now_ts=int(time.time()),
+            duration_days=duration_days,
+            reason="operator_command",
+            messages_per_day=command.messages_per_day,
+            explicit_images_per_day=command.explicit_images_per_day,
+            product_id=product_id,
+        )
+    except ValueError as exc:
+        await message.answer(f"grant_failed: {exc}")
+        return
+    await message.answer(f"grant_ok: user={command.target_user_id} tier={entitlement.tier.value} expires={entitlement.expires_at}")
+
+
+@dp.message(Command("revoke_access"))
+async def cmd_revoke_access(message: types.Message):
+    if await _deny_non_operator(message):
+        return
+    command = parse_operator_command(message.text or "")
+    if await _require_confirm(message, command.confirmed):
+        return
+    if await _throttle_sensitive_operator_action(message):
+        return
+    if command.target_user_id is None:
+        await message.answer("usage: /revoke_access <telegram_user_id> confirm")
+        return
+    revoked = _monetization_service().revoke_manual_access(
+        operator_ref=_operator_user_ref(message),
+        target_ref=legacy_user_ref(command.target_user_id),
+        now_ts=int(time.time()),
+        reason="operator_command",
+    )
+    await message.answer(f"revoke_ok: user={command.target_user_id} revoked={revoked}")
+
+
+@dp.message(Command("fulfill_order"))
+async def cmd_fulfill_order(message: types.Message):
+    if await _deny_non_operator(message):
+        return
+    command = parse_operator_command(message.text or "")
+    if await _require_confirm(message, command.confirmed):
+        return
+    if await _throttle_sensitive_operator_action(message):
+        return
+    if not command.target_order_id:
+        await message.answer("usage: /fulfill_order <order_id> confirm")
+        return
+    try:
+        entitlement = _monetization_service().fulfill_order_repair(
+            operator_ref=_operator_user_ref(message),
+            order_id=command.target_order_id,
+            now_ts=int(time.time()),
+            reason="operator_command",
+        )
+    except ValueError as exc:
+        await message.answer(f"fulfill_failed: {exc}")
+        return
+    await message.answer(f"fulfill_ok: order={command.target_order_id} entitlement={entitlement.entitlement_id}")
+
+
+@dp.message(Command("user_status"))
+async def cmd_user_status(message: types.Message):
+    if await _deny_non_operator(message):
+        return
+    command = parse_operator_command(message.text or "")
+    if command.target_user_id is None:
+        await message.answer("usage: /user_status <telegram_user_id>")
+        return
+    snapshot = _monetization_service().get_access_snapshot(legacy_user_ref(command.target_user_id), now_ts=int(time.time()))
+    await message.answer(render_tariff_status(snapshot))
+
+
+@dp.message(Command("usage_status"))
+async def cmd_usage_status(message: types.Message):
+    if await _deny_non_operator(message):
+        return
+    command = parse_operator_command(message.text or "")
+    if command.target_user_id is None:
+        await message.answer("usage: /usage_status <telegram_user_id>")
+        return
+    snapshot = _monetization_service().get_access_snapshot(legacy_user_ref(command.target_user_id), now_ts=int(time.time()))
+    await message.answer(
+        f"user={command.target_user_id} messages={snapshot.usage.messages_used}/{snapshot.limits.messages_per_day} "
+        f"images={snapshot.usage.explicit_images_used}/{snapshot.limits.explicit_images_per_day} reset_at={snapshot.usage.reset_at}"
+    )
+
+
+@dp.message(Command("admin_users"))
+async def cmd_admin_users(message: types.Message):
+    if await _deny_non_operator(message):
+        return
+    command = parse_operator_command(message.text or "")
+    summaries = _monetization_service().list_admin_user_summaries(
+        now_ts=int(time.time()),
+        q=command.filters.get("q"),
+        tier=command.filters.get("tier"),
+        sort=command.sort,
+        desc=command.desc,
+        page=command.page,
+    )
+    await message.answer(render_admin_user_summaries(summaries) or "empty")
+
 @dp.message(F.text)
 async def on_text(message: types.Message):
     user_id = message.from_user.id
@@ -2466,6 +2755,10 @@ async def on_text(message: types.Message):
         # 2) Запускаем генерацию
         profile = get_user_profile(user_id)
         mode = (profile.get("mode") or "basic").strip()
+        image_decision = authorize_runtime_explicit_image(user_id) if mode == "whore" else AccessDecision(True)
+        if not image_decision.allowed:
+            await message.answer("Лимит или доступ к explicit-картинкам сейчас недоступен.")
+            return
         style_hint = MODE_TO_IMAGE_STYLE.get(mode, MODE_TO_IMAGE_STYLE["basic"])
 
         image_prompt = f"Стиль/арт-дирекшн: {style_hint}\nЗапрос пользователя: {user_text}"
@@ -2557,6 +2850,8 @@ async def on_text(message: types.Message):
 
         # Отдаём картинку пользователю
         await message.answer_photo(BufferedInputFile(img_bytes, filename="image.png"))
+        if mode == "whore":
+            record_runtime_explicit_image_usage(user_id)
 
         # --- LOG: photo_result success ---
         log_user_event(
@@ -2596,6 +2891,14 @@ async def on_text(message: types.Message):
    
     profile = get_user_profile(user_id)
     mode = (profile.get("mode") or "basic").strip()
+    persona_decision = authorize_runtime_persona(user_id, mode)
+    if not persona_decision.allowed:
+        await message.answer("Доступ к этому персонажу сейчас закрыт.")
+        return
+    message_decision = _monetization_service().can_send_message(legacy_user_ref(user_id), now_ts=now)
+    if not message_decision.allowed:
+        await message.answer("Дневной лимит сообщений по тарифу исчерпан. Проверь остаток по тарифу или обнови доступ.")
+        return
 
     locked, reason = is_mode_locked(user_id, mode)
     if locked:
@@ -2624,6 +2927,7 @@ async def on_text(message: types.Message):
 
 
     append_history(user_id, mode, "user", user_text_for_history)
+    record_runtime_message_usage(user_id)
     history = get_history(user_id, mode)
 
     memory_block = format_state_block(state)

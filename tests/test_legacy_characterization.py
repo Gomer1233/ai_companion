@@ -152,6 +152,18 @@ async def test_whore_status_is_mode_specific(module_loader, mark_mode_picked):
     assert basic_message.answers
     assert WHORE_ONLY_TEXT in basic_message.answers[-1]["text"]
 
+    user_ref = module.legacy_user_ref(1)
+    module.DB_REPOSITORIES.upsert_entitlement(
+        entitlement_id="legacy-whore-access",
+        user_ref=user_ref,
+        plan_id="premium_30d",
+        tier="premium",
+        starts_at=1,
+        expires_at=2_000_000_000,
+        source="manual:test",
+        created_at=1,
+    )
+    module.DB_REPOSITORIES.set_explicit_consent(user_ref, accepted_at=1, source="test")
     whore_callback = FakeCallbackQuery("setmode:whore")
     await module.cb_setmode(whore_callback)
     whore_message = FakeMessage("/status")

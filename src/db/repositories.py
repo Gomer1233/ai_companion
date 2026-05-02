@@ -6,6 +6,17 @@ import uuid
 from dataclasses import dataclass
 from typing import Any
 
+from src.core.monetization import (
+    AlphaProductCatalog,
+    Entitlement,
+    ExplicitConsent,
+    PaymentOrder,
+    PaymentProvider,
+    PaymentStatus,
+    ProductId,
+    Tier,
+    UsageCounter,
+)
 from src.core.contracts import (
     AnalyticsEvent,
     ConversationRecord,
@@ -849,6 +860,783 @@ class SQLiteRepositories:
             conn.commit()
         finally:
             conn.close()
+
+    def _ensure_storage_user(self, user_ref: UserRef) -> None:
+        ensure_user = getattr(self, "_ensure_user", None)
+        if ensure_user is not None:
+            ensure_user(user_ref)
+
+    def upsert_entitlement(
+        self,
+        *,
+        entitlement_id: str,
+        user_ref: UserRef,
+        plan_id: str,
+        tier: Tier | str,
+        starts_at: int,
+        expires_at: int | None,
+        source: str,
+        created_at: int,
+        status: str = "active",
+        revoked_at: int | None = None,
+        revoked_by: str | None = None,
+        revoked_reason: str | None = None,
+        metadata: dict[str, object] | None = None,
+    ) -> Entitlement:
+        self._ensure_storage_user(user_ref)
+        user_id = self._user_id(user_ref)
+        resolved_tier = Tier(tier)
+        metadata_json = json.dumps(metadata or {}, ensure_ascii=False, sort_keys=True)
+        conn = self._connect()
+        try:
+            conn.execute(
+                """
+                INSERT INTO entitlements(
+                  entitlement_id, user_id, plan_id, tier, starts_at, expires_at, status, source, created_at,
+                  revoked_at, revoked_by, revoked_reason, metadata_json
+                )
+                VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?)
+                ON CONFLICT(entitlement_id) DO UPDATE SET
+                  plan_id=excluded.plan_id,
+                  tier=excluded.tier,
+                  starts_at=excluded.starts_at,
+                  expires_at=excluded.expires_at,
+                  status=excluded.status,
+                  source=excluded.source,
+                  revoked_at=excluded.revoked_at,
+                  revoked_by=excluded.revoked_by,
+                  revoked_reason=excluded.revoked_reason,
+                  metadata_json=excluded.metadata_json
+                """,
+                (
+                    entitlement_id,
+                    user_id,
+                    plan_id,
+                    resolved_tier.value,
+                    int(starts_at),
+                    expires_at,
+                    status,
+                    source,
+                    int(created_at),
+                    revoked_at,
+                    revoked_by,
+                    revoked_reason,
+                    metadata_json,
+                ),
+            )
+            conn.commit()
+        finally:
+            conn.close()
+        return Entitlement(
+            entitlement_id=entitlement_id,
+            user_ref=user_ref,
+            plan_id=plan_id,
+            tier=resolved_tier,
+            starts_at=int(starts_at),
+            expires_at=expires_at,
+            status=status,
+            source=source,
+            created_at=int(created_at),
+            revoked_at=revoked_at,
+            revoked_by=revoked_by,
+            revoked_reason=revoked_reason,
+            metadata=metadata or {},
+        )
+
+    def load_active_entitlements(self, user_ref: UserRef, now_ts: int) -> list[Entitlement]:
+        user_id = self._user_id(user_ref)
+        conn = self._connect()
+        try:
+            rows = conn.execute(
+                """
+                SELECT entitlement_id, user_id, plan_id, tier, starts_at, expires_at, status, source, created_at,
+                       revoked_at, revoked_by, revoked_reason, metadata_json
+                FROM entitlements
+                WHERE user_id=?
+                  AND starts_at <= ?
+                  AND (expires_at IS NULL OR expires_at > ?)
+                  AND status='active'
+                  AND revoked_at IS NULL
+                ORDER BY starts_at DESC, created_at DESC
+                """,
+                (user_id, int(now_ts), int(now_ts)),
+            ).fetchall()
+        finally:
+            conn.close()
+        return [self._entitlement_from_row(row) for row in rows]
+
+    def count_fulfilled_product(self, product_id: ProductId | str) -> int:
+        resolved_product = ProductId(product_id)
+        conn = self._connect()
+        try:
+            row = conn.execute(
+                """
+                SELECT COUNT(*)
+                FROM payment_orders
+                WHERE product_id=? AND status=?
+                """,
+                (resolved_product.value, PaymentStatus.FULFILLED.value),
+            ).fetchone()
+        finally:
+            conn.close()
+        return int(row[0] if row else 0)
+
+    def increment_usage(
+        self,
+        user_ref: UserRef,
+        counter_key: str,
+        *,
+        window_start: int,
+        window_end: int,
+        amount: int = 1,
+    ) -> int:
+        self._ensure_storage_user(user_ref)
+        user_id = self._user_id(user_ref)
+        conn = self._connect()
+        try:
+            conn.execute(
+                """
+                INSERT INTO usage_counters(user_id, counter_key, window_start, window_end, value)
+                VALUES(?, ?, ?, ?, ?)
+                ON CONFLICT(user_id, counter_key, window_start) DO UPDATE SET
+                  window_end=excluded.window_end,
+                  value=usage_counters.value + excluded.value
+                """,
+                (user_id, counter_key, int(window_start), int(window_end), int(amount)),
+            )
+            row = conn.execute(
+                """
+                SELECT value FROM usage_counters
+                WHERE user_id=? AND counter_key=? AND window_start=?
+                """,
+                (user_id, counter_key, int(window_start)),
+            ).fetchone()
+            conn.commit()
+        finally:
+            conn.close()
+        return int(row[0])
+
+    def load_usage(self, user_ref: UserRef, counter_key: str, *, window_start: int) -> UsageCounter:
+        user_id = self._user_id(user_ref)
+        conn = self._connect()
+        try:
+            row = conn.execute(
+                """
+                SELECT user_id, counter_key, window_start, window_end, value
+                FROM usage_counters
+                WHERE user_id=? AND counter_key=? AND window_start=?
+                """,
+                (user_id, counter_key, int(window_start)),
+            ).fetchone()
+        finally:
+            conn.close()
+        if not row:
+            return UsageCounter(user_ref=user_ref, counter_key=counter_key, window_start=window_start, window_end=window_start, value=0)
+        return UsageCounter(
+            user_ref=legacy_user_ref(int(row[0])),
+            counter_key=str(row[1]),
+            window_start=int(row[2]),
+            window_end=int(row[3]),
+            value=int(row[4]),
+        )
+
+    def set_explicit_consent(self, user_ref: UserRef, *, accepted_at: int, source: str) -> ExplicitConsent:
+        self._ensure_storage_user(user_ref)
+        user_id = self._user_id(user_ref)
+        conn = self._connect()
+        try:
+            conn.execute(
+                """
+                INSERT INTO explicit_consent(user_id, accepted_at, revoked_at, source)
+                VALUES(?, ?, NULL, ?)
+                ON CONFLICT(user_id) DO UPDATE SET
+                  accepted_at=excluded.accepted_at,
+                  revoked_at=NULL,
+                  source=excluded.source
+                """,
+                (user_id, int(accepted_at), source),
+            )
+            conn.commit()
+        finally:
+            conn.close()
+        return ExplicitConsent(user_ref=user_ref, accepted_at=int(accepted_at), revoked_at=None, source=source)
+
+    def load_explicit_consent(self, user_ref: UserRef) -> ExplicitConsent | None:
+        user_id = self._user_id(user_ref)
+        conn = self._connect()
+        try:
+            row = conn.execute(
+                "SELECT user_id, accepted_at, revoked_at, source FROM explicit_consent WHERE user_id=?",
+                (user_id,),
+            ).fetchone()
+        finally:
+            conn.close()
+        if not row:
+            return None
+        return ExplicitConsent(
+            user_ref=legacy_user_ref(int(row[0])),
+            accepted_at=int(row[1]),
+            revoked_at=None if row[2] is None else int(row[2]),
+            source=str(row[3]),
+        )
+
+    def create_payment_order(self, order: PaymentOrder) -> PaymentOrder:
+        self._ensure_storage_user(order.user_ref)
+        user_id = self._user_id(order.user_ref)
+        conn = self._connect()
+        try:
+            conn.execute(
+                """
+                INSERT INTO payment_orders(
+                  order_id, user_id, provider, product_id, amount_minor, currency, status, entitlement_id,
+                  provider_payment_id, provider_payload_json, created_at, paid_at, fulfilled_at, refunded_at,
+                  cancelled_at, error_code
+                )
+                VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
+                """,
+                (
+                    order.order_id,
+                    user_id,
+                    order.provider.value,
+                    order.product_id.value,
+                    order.amount_minor,
+                    order.currency,
+                    order.status.value,
+                    order.entitlement_id,
+                    order.provider_payment_id,
+                    order.provider_payload_json or "{}",
+                    order.created_at,
+                    order.paid_at,
+                    order.fulfilled_at,
+                    order.refunded_at,
+                    order.cancelled_at,
+                    order.error_code,
+                ),
+            )
+            conn.commit()
+        finally:
+            conn.close()
+        return order
+
+    def load_payment_order(self, order_id: str) -> PaymentOrder | None:
+        conn = self._connect()
+        try:
+            row = conn.execute(
+                """
+                SELECT order_id, user_id, provider, product_id, amount_minor, currency, status, entitlement_id,
+                       provider_payment_id, provider_payload_json, created_at, paid_at, fulfilled_at, refunded_at,
+                       cancelled_at, error_code
+                FROM payment_orders
+                WHERE order_id=?
+                """,
+                (order_id,),
+            ).fetchone()
+        finally:
+            conn.close()
+        if not row:
+            return None
+        return self._payment_order_from_row(row)
+
+    def list_paid_unfulfilled_orders(self) -> list[PaymentOrder]:
+        conn = self._connect()
+        try:
+            rows = conn.execute(
+                """
+                SELECT order_id, user_id, provider, product_id, amount_minor, currency, status, entitlement_id,
+                       provider_payment_id, provider_payload_json, created_at, paid_at, fulfilled_at, refunded_at,
+                       cancelled_at, error_code
+                FROM payment_orders
+                WHERE status=? AND entitlement_id IS NULL
+                ORDER BY paid_at ASC, created_at ASC
+                """,
+                (PaymentStatus.PAID.value,),
+            ).fetchall()
+        finally:
+            conn.close()
+        return [self._payment_order_from_row(row) for row in rows]
+
+    def mark_payment_order_paid(
+        self,
+        order_id: str,
+        *,
+        provider_payment_id: str,
+        provider_payload_json: str,
+        paid_at: int,
+    ) -> PaymentOrder:
+        conn = self._connect()
+        try:
+            conn.execute(
+                """
+                UPDATE payment_orders
+                SET status=?, provider_payment_id=?, provider_payload_json=?, paid_at=?
+                WHERE order_id=? AND status IN (?, ?)
+                """,
+                (
+                    PaymentStatus.PAID.value,
+                    provider_payment_id,
+                    provider_payload_json or "{}",
+                    int(paid_at),
+                    order_id,
+                    PaymentStatus.PENDING.value,
+                    PaymentStatus.PAID.value,
+                ),
+            )
+            conn.commit()
+        finally:
+            conn.close()
+        order = self.load_payment_order(order_id)
+        if order is None:
+            raise ValueError("payment_order_not_found")
+        return order
+
+    def mark_payment_order_refunded(self, order_id: str, *, refunded_at: int) -> PaymentOrder:
+        conn = self._connect()
+        try:
+            conn.execute(
+                """
+                UPDATE payment_orders
+                SET status=?, refunded_at=?
+                WHERE order_id=?
+                """,
+                (PaymentStatus.REFUNDED.value, int(refunded_at), order_id),
+            )
+            conn.commit()
+        finally:
+            conn.close()
+        order = self.load_payment_order(order_id)
+        if order is None:
+            raise ValueError("payment_order_not_found")
+        return order
+
+    def mark_payment_order_cancelled(self, order_id: str, *, cancelled_at: int) -> PaymentOrder:
+        conn = self._connect()
+        try:
+            conn.execute(
+                """
+                UPDATE payment_orders
+                SET status=?, cancelled_at=?
+                WHERE order_id=?
+                """,
+                (PaymentStatus.CANCELLED.value, int(cancelled_at), order_id),
+            )
+            conn.commit()
+        finally:
+            conn.close()
+        order = self.load_payment_order(order_id)
+        if order is None:
+            raise ValueError("payment_order_not_found")
+        return order
+
+    def mark_payment_order_failed(self, order_id: str, *, error_code: str) -> PaymentOrder:
+        conn = self._connect()
+        try:
+            conn.execute(
+                """
+                UPDATE payment_orders
+                SET status=?, error_code=?
+                WHERE order_id=?
+                """,
+                (PaymentStatus.FAILED.value, error_code, order_id),
+            )
+            conn.commit()
+        finally:
+            conn.close()
+        order = self.load_payment_order(order_id)
+        if order is None:
+            raise ValueError("payment_order_not_found")
+        return order
+
+    def fulfill_paid_order_transactionally(self, order_id: str, *, now_ts: int) -> Entitlement:
+        conn = self._connect()
+        try:
+            with conn:
+                order_row = conn.execute(
+                    """
+                    SELECT order_id, user_id, provider, product_id, amount_minor, currency, status, entitlement_id,
+                           provider_payment_id, provider_payload_json, created_at, paid_at, fulfilled_at, refunded_at,
+                           cancelled_at, error_code
+                    FROM payment_orders
+                    WHERE order_id=?
+                    """,
+                    (order_id,),
+                ).fetchone()
+                if not order_row:
+                    raise ValueError("payment_order_not_found")
+                order = self._payment_order_from_row(order_row)
+                source = f"payment:{order.provider.value}:{order.order_id}"
+
+                existing_row = conn.execute(
+                    """
+                    SELECT entitlement_id, user_id, plan_id, tier, starts_at, expires_at, status, source, created_at,
+                           revoked_at, revoked_by, revoked_reason, metadata_json
+                    FROM entitlements
+                    WHERE source=?
+                    """,
+                    (source,),
+                ).fetchone()
+                existing = self._entitlement_from_row(existing_row) if existing_row else None
+                if order.status == PaymentStatus.FULFILLED:
+                    if existing is not None:
+                        return existing
+                    if order.entitlement_id:
+                        entitlement = self._load_entitlement_by_id_in_conn(conn, order.entitlement_id)
+                        if entitlement is not None:
+                            return entitlement
+                    raise ValueError("fulfilled_order_missing_entitlement")
+                if order.status != PaymentStatus.PAID:
+                    raise ValueError("payment_order_not_paid")
+
+                if existing is None:
+                    if order.product_id == ProductId.LIFETIME_PREMIUM_100:
+                        count_row = conn.execute(
+                            """
+                            SELECT
+                              (
+                                SELECT COUNT(*)
+                                FROM entitlements
+                                WHERE plan_id=? AND status='active' AND revoked_at IS NULL
+                              ) + (
+                                SELECT COUNT(*)
+                                FROM payment_orders orders
+                                WHERE orders.product_id=? AND orders.status=?
+                                  AND NOT EXISTS (
+                                    SELECT 1
+                                    FROM entitlements ent
+                                    WHERE ent.entitlement_id=orders.entitlement_id
+                                      AND ent.plan_id=orders.product_id
+                                      AND ent.status='active'
+                                      AND ent.revoked_at IS NULL
+                                  )
+                              )
+                            """,
+                            (
+                                ProductId.LIFETIME_PREMIUM_100.value,
+                                ProductId.LIFETIME_PREMIUM_100.value,
+                                PaymentStatus.FULFILLED.value,
+                            ),
+                        ).fetchone()
+                        if int(count_row[0] if count_row else 0) >= 100:
+                            raise ValueError("lifetime_cap_reached")
+                    product = AlphaProductCatalog.default().get(order.product_id)
+                    entitlement_id = uuid.uuid4().hex
+                    expires_at = None
+                    if product.duration_days is not None:
+                        expires_at = int(now_ts) + product.duration_days * 86_400
+                    conn.execute(
+                        """
+                        INSERT INTO entitlements(
+                          entitlement_id, user_id, plan_id, tier, starts_at, expires_at, status, source, created_at,
+                          revoked_at, revoked_by, revoked_reason, metadata_json
+                        )
+                        VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?)
+                        """,
+                        (
+                            entitlement_id,
+                            self._user_id(order.user_ref),
+                            order.product_id.value,
+                            product.tier.value,
+                            int(now_ts),
+                            expires_at,
+                            "active",
+                            source,
+                            int(now_ts),
+                            None,
+                            None,
+                            None,
+                            "{}",
+                        ),
+                    )
+                    existing = self._load_entitlement_by_id_in_conn(conn, entitlement_id)
+                    if existing is None:
+                        raise ValueError("created_entitlement_not_found")
+
+                conn.execute(
+                    """
+                    UPDATE payment_orders
+                    SET status=?, entitlement_id=?, fulfilled_at=?
+                    WHERE order_id=?
+                    """,
+                    (PaymentStatus.FULFILLED.value, existing.entitlement_id, int(now_ts), order_id),
+                )
+                return existing
+        finally:
+            conn.close()
+
+    def revoke_entitlements(
+        self,
+        user_ref: UserRef,
+        *,
+        revoked_by: str,
+        revoked_at: int,
+        reason: str,
+        source_filter: str | None = None,
+    ) -> int:
+        user_id = self._user_id(user_ref)
+        params: list[Any] = ["revoked", int(revoked_at), revoked_by, reason, user_id]
+        source_sql = ""
+        if source_filter is not None:
+            source_sql = " AND source=?"
+            params.append(source_filter)
+        conn = self._connect()
+        try:
+            cursor = conn.execute(
+                f"""
+                UPDATE entitlements
+                SET status=?, revoked_at=?, revoked_by=?, revoked_reason=?
+                WHERE user_id=? AND status='active' AND revoked_at IS NULL{source_sql}
+                """,
+                tuple(params),
+            )
+            conn.commit()
+            return int(cursor.rowcount or 0)
+        finally:
+            conn.close()
+
+    def append_admin_audit_event(
+        self,
+        *,
+        audit_id: str,
+        operator_user_id: str,
+        action: str,
+        result: str,
+        created_at: int,
+        target_user_id: int | None = None,
+        target_order_id: str | None = None,
+        reason: str = "",
+        metadata: dict[str, object] | None = None,
+    ) -> None:
+        conn = self._connect()
+        try:
+            conn.execute(
+                """
+                INSERT INTO admin_audit_events(
+                  audit_id, operator_user_id, target_user_id, target_order_id, action, result, reason, created_at, metadata_json
+                )
+                VALUES(?,?,?,?,?,?,?,?,?)
+                """,
+                (
+                    audit_id,
+                    operator_user_id,
+                    target_user_id,
+                    target_order_id,
+                    action,
+                    result,
+                    reason,
+                    int(created_at),
+                    json.dumps(metadata or {}, ensure_ascii=False, sort_keys=True),
+                ),
+            )
+            conn.commit()
+        finally:
+            conn.close()
+
+    def count_admin_audit_events(self, *, action: str, target_user_id: int | None = None) -> int:
+        params: list[Any] = [action]
+        target_sql = ""
+        if target_user_id is not None:
+            target_sql = " AND target_user_id=?"
+            params.append(target_user_id)
+        conn = self._connect()
+        try:
+            row = conn.execute(
+                f"SELECT COUNT(*) FROM admin_audit_events WHERE action=?{target_sql}",
+                tuple(params),
+            ).fetchone()
+        finally:
+            conn.close()
+        return int(row[0] if row else 0)
+
+    def load_manual_lifetime_entitlement_count(self) -> int:
+        conn = self._connect()
+        try:
+            row = conn.execute(
+                """
+                SELECT
+                  (
+                    SELECT COUNT(*)
+                    FROM entitlements
+                    WHERE plan_id=? AND status='active' AND revoked_at IS NULL
+                  ) + (
+                    SELECT COUNT(*)
+                    FROM payment_orders orders
+                    WHERE orders.product_id=? AND orders.status=?
+                      AND NOT EXISTS (
+                        SELECT 1
+                        FROM entitlements ent
+                        WHERE ent.entitlement_id=orders.entitlement_id
+                          AND ent.plan_id=orders.product_id
+                          AND ent.status='active'
+                          AND ent.revoked_at IS NULL
+                      )
+                  )
+                """,
+                (
+                    ProductId.LIFETIME_PREMIUM_100.value,
+                    ProductId.LIFETIME_PREMIUM_100.value,
+                    PaymentStatus.FULFILLED.value,
+                ),
+            ).fetchone()
+        finally:
+            conn.close()
+        return int(row[0] if row else 0)
+
+    def list_admin_user_identities(self, *, q: str | None = None) -> list[dict[str, Any]]:
+        query = (q or "").strip().lower()
+        conn = self._connect()
+        try:
+            rows = conn.execute(
+                """
+                WITH known_users AS (
+                  SELECT user_id FROM user_profile
+                  UNION
+                  SELECT user_id FROM user_events
+                  UNION
+                  SELECT user_id FROM entitlements
+                  UNION
+                  SELECT user_id FROM payment_orders
+                  UNION
+                  SELECT user_id FROM usage_counters
+                )
+                SELECT
+                  known_users.user_id,
+                  COALESCE(
+                    NULLIF((
+                      SELECT first_name
+                      FROM user_events latest_name
+                      WHERE latest_name.user_id = known_users.user_id AND latest_name.first_name <> ''
+                      ORDER BY latest_name.ts DESC, latest_name.id DESC
+                      LIMIT 1
+                    ), ''),
+                    NULLIF(profile.preferred_name, ''),
+                    ''
+                  ) AS name,
+                  COALESCE(
+                    NULLIF((
+                      SELECT username
+                      FROM user_events latest_username
+                      WHERE latest_username.user_id = known_users.user_id AND latest_username.username <> ''
+                      ORDER BY latest_username.ts DESC, latest_username.id DESC
+                      LIMIT 1
+                    ), ''),
+                    ''
+                  ) AS username,
+                  (
+                    SELECT MAX(ts)
+                    FROM user_events latest_event
+                    WHERE latest_event.user_id = known_users.user_id
+                  ) AS last_active_at
+                FROM known_users
+                LEFT JOIN user_profile profile ON profile.user_id = known_users.user_id
+                ORDER BY known_users.user_id ASC
+                """
+            ).fetchall()
+        finally:
+            conn.close()
+        identities = [
+            {
+                "telegram_user_id": int(row[0]),
+                "name": str(row[1] or ""),
+                "username": str(row[2] or ""),
+                "last_active_at": None if row[3] is None else int(row[3]),
+            }
+            for row in rows
+        ]
+        if not query:
+            return identities
+        filtered: list[dict[str, Any]] = []
+        for identity in identities:
+            name = str(identity.get("name") or "")
+            username = str(identity.get("username") or "")
+            if query in str(identity["telegram_user_id"]) or query in name.lower() or query in username.lower():
+                filtered.append(identity)
+        return filtered
+
+    def load_latest_payment_status(self, user_ref: UserRef) -> str:
+        user_id = self._user_id(user_ref)
+        conn = self._connect()
+        try:
+            row = conn.execute(
+                """
+                SELECT status
+                FROM payment_orders
+                WHERE user_id=?
+                ORDER BY COALESCE(fulfilled_at, paid_at, created_at) DESC, created_at DESC
+                LIMIT 1
+                """,
+                (user_id,),
+            ).fetchone()
+        finally:
+            conn.close()
+        return str(row[0]) if row else "none"
+
+    def load_llm_token_totals(self, user_ref: UserRef) -> tuple[int, int]:
+        user_id = self._user_id(user_ref)
+        conn = self._connect()
+        try:
+            row = conn.execute(
+                """
+                SELECT COALESCE(SUM(prompt_tokens), 0), COALESCE(SUM(completion_tokens), 0)
+                FROM user_events
+                WHERE user_id=?
+                """,
+                (user_id,),
+            ).fetchone()
+        finally:
+            conn.close()
+        if not row:
+            return 0, 0
+        return int(row[0] or 0), int(row[1] or 0)
+
+    def _load_entitlement_by_id_in_conn(self, conn: Any, entitlement_id: str) -> Entitlement | None:
+        row = conn.execute(
+            """
+            SELECT entitlement_id, user_id, plan_id, tier, starts_at, expires_at, status, source, created_at,
+                   revoked_at, revoked_by, revoked_reason, metadata_json
+            FROM entitlements
+            WHERE entitlement_id=?
+            """,
+            (entitlement_id,),
+        ).fetchone()
+        return self._entitlement_from_row(row) if row else None
+
+    def _entitlement_from_row(self, row: Any) -> Entitlement:
+        metadata_json = row[12] or "{}"
+        metadata = json.loads(metadata_json)
+        return Entitlement(
+            entitlement_id=str(row[0]),
+            user_ref=legacy_user_ref(int(row[1])),
+            plan_id=str(row[2] or ""),
+            tier=Tier(str(row[3])),
+            starts_at=int(row[4]),
+            expires_at=None if row[5] is None else int(row[5]),
+            status=str(row[6]),
+            source=str(row[7]),
+            created_at=int(row[8]),
+            revoked_at=None if row[9] is None else int(row[9]),
+            revoked_by=None if row[10] is None else str(row[10]),
+            revoked_reason=None if row[11] is None else str(row[11]),
+            metadata=metadata if isinstance(metadata, dict) else {},
+        )
+
+    def _payment_order_from_row(self, row: Any) -> PaymentOrder:
+        return PaymentOrder(
+            order_id=str(row[0]),
+            user_ref=legacy_user_ref(int(row[1])),
+            provider=PaymentProvider(str(row[2])),
+            product_id=ProductId(str(row[3])),
+            amount_minor=int(row[4]),
+            currency=str(row[5]),
+            status=PaymentStatus(str(row[6])),
+            entitlement_id=None if row[7] is None else str(row[7]),
+            provider_payment_id=None if row[8] is None else str(row[8]),
+            provider_payload_json=None if row[9] is None else str(row[9]),
+            created_at=int(row[10]),
+            paid_at=None if row[11] is None else int(row[11]),
+            fulfilled_at=None if row[12] is None else int(row[12]),
+            refunded_at=None if row[13] is None else int(row[13]),
+            cancelled_at=None if row[14] is None else int(row[14]),
+            error_code=None if row[15] is None else str(row[15]),
+        )
 
     def reset_conversation(self, user_ref: UserRef, conversation_ref: ConversationRef) -> None:
         user_id = self._user_id(user_ref)
