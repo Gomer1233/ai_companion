@@ -19,7 +19,7 @@
 - Alpha launch planning now lives under `docs/current/alpha-launch/`.
 - `ALPHA-002 FastAPI HTTP Adapter` is merged to `main`.
 - `ALPHA-003 Postgres Backend + Cutover Runbook` is merged to `main`.
-- `ALPHA-004 Provider Matrix + Explicit Policy Layer` is in progress on `codex/alpha-004-provider-matrix`.
+- `ALPHA-004 Provider Matrix + Explicit Policy Layer` is implemented and locally verified on `codex/alpha-004-implementation`; the branch is ready to push for PR review.
 - Post-alpha standalone Web direction is captured as an accepted identity/readiness decision: `docs/adr/0002-user-identity-and-standalone-web-readiness.md`.
 
 ## Completed
@@ -74,10 +74,16 @@
   - `UserRef` is the primary product identity
   - Telegram accounts are linked identities
   - standalone Web with chat is a post-alpha direction
+- `ALPHA-004` now adds:
+  - `AccessPolicyService` for explicit provider/model eligibility and category-level moderation blocks
+  - frozen alpha launch model manifest separate from `src/config/modes.py`
+  - explicit-safe judge and prompt-translation defaults
+  - request-time guards for explicit image generation and prompt translation
+  - focused provider matrix and routing tests
 
 ## Next Step
 
-Continue `ALPHA-004 Provider Matrix + Explicit Policy Layer` from `codex/alpha-004-provider-matrix`.
+Push `codex/alpha-004-implementation`, open PR review for `ALPHA-004 Provider Matrix + Explicit Policy Layer`, then merge it before starting `ALPHA-005 Monetization Core + Admin Commands` from updated `main`.
 
 ## Risks / Notes
 

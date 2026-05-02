@@ -7,6 +7,7 @@ import pytest
 from src.app.provider_registry import ProviderRegistry
 from src.app.settings import Settings
 from src.app.variants import MAIN_APP_VARIANT, TELEGRAM_CHANNEL_CONFIG
+from src.config.alpha_launch_manifest import ALPHA_LAUNCH_MODEL_MANIFEST, validate_alpha_launch_manifest
 from src.core.contracts import (
     AnalyticsEvent,
     AnalyticsEventType,
@@ -25,6 +26,13 @@ from src.core.contracts import (
     resolve_current_conversation,
     validate_default_conversations,
 )
+from src.core.access_policy import (
+    AccessPolicyService,
+    ExplicitCapability,
+    ExplicitModerationCategory,
+    ExplicitPolicyInput,
+    LaunchManifestRecord,
+)
 
 
 def test_persona_models_do_not_use_known_unavailable_openrouter_ids() -> None:
@@ -42,6 +50,178 @@ def test_persona_models_do_not_use_known_unavailable_openrouter_ids() -> None:
     }
 
     assert configured_unavailable == {}
+
+
+def test_access_policy_rejects_openai_provider_for_explicit_text_and_image() -> None:
+    service = AccessPolicyService.alpha_default()
+
+    assert service.authorize_explicit(
+        ExplicitPolicyInput(
+            mode="whore",
+            capability=ExplicitCapability.TEXT,
+            provider="openrouter",
+            model="x-ai/grok-4.1-fast",
+        )
+    ).allowed is True
+    assert service.authorize_explicit(
+        ExplicitPolicyInput(
+            mode="whore",
+            capability=ExplicitCapability.IMAGE,
+            provider="modelslab",
+            model="pinned-model",
+        )
+    ).allowed is True
+
+    text_decision = service.authorize_explicit(
+        ExplicitPolicyInput(
+            mode="whore",
+            capability=ExplicitCapability.TEXT,
+            provider="openai",
+            model="gpt-4o-mini",
+        )
+    )
+    image_decision = service.authorize_explicit(
+        ExplicitPolicyInput(
+            mode="whore",
+            capability=ExplicitCapability.IMAGE,
+            provider="openai",
+            model="gpt-image-1",
+        )
+    )
+
+    assert text_decision.allowed is False
+    assert image_decision.allowed is False
+    assert "provider_not_allowed" in text_decision.reasons
+    assert "provider_not_allowed" in image_decision.reasons
+
+
+def test_access_policy_rejects_openai_model_ids_even_when_provider_is_openrouter() -> None:
+    service = AccessPolicyService.alpha_default()
+
+    decision = service.authorize_explicit(
+        ExplicitPolicyInput(
+            mode="whore",
+            capability=ExplicitCapability.TEXT,
+            provider="openrouter",
+            model="openai/gpt-4o-mini",
+        )
+    )
+
+    assert decision.allowed is False
+    assert "openai_model_not_allowed" in decision.reasons
+
+
+def test_access_policy_enforces_explicit_moderation_blocks() -> None:
+    service = AccessPolicyService.alpha_default()
+
+    for category in ExplicitModerationCategory:
+        decision = service.authorize_explicit(
+            ExplicitPolicyInput(
+                mode="whore",
+                capability=ExplicitCapability.TEXT,
+                provider="openrouter",
+                model="x-ai/grok-4.1-fast",
+                moderation_categories=(category,),
+            )
+        )
+        assert decision.allowed is False
+        assert category.value in decision.reasons
+
+
+def test_non_explicit_mode_is_not_blocked_by_explicit_provider_policy() -> None:
+    service = AccessPolicyService.alpha_default()
+
+    decision = service.authorize_explicit(
+        ExplicitPolicyInput(
+            mode="basic",
+            capability=ExplicitCapability.IMAGE,
+            provider="openai",
+            model="gpt-image-1",
+        )
+    )
+
+    assert decision.allowed is True
+
+
+def test_alpha_launch_manifest_is_independent_frozen_config() -> None:
+    records = ALPHA_LAUNCH_MODEL_MANIFEST
+
+    assert records
+    assert all(record.persona for record in records)
+    assert all(record.model for record in records)
+    assert {record.persona for record in records} == {"whore"}
+
+
+def test_alpha_launch_manifest_rejects_openai_model_ids() -> None:
+    service = AccessPolicyService.alpha_default()
+    blocked = (
+        LaunchManifestRecord(
+            persona="whore",
+            provider="openrouter",
+            model="openai/gpt-4o-mini",
+            capabilities=(ExplicitCapability.TEXT,),
+            enabled=True,
+        ),
+    )
+
+    with pytest.raises(ValueError, match="openai_model_not_allowed"):
+        validate_alpha_launch_manifest(blocked, service)
+
+
+def test_explicit_defaults_do_not_point_to_openai() -> None:
+    settings = Settings.from_env({"TELEGRAM_TOKEN": "tg-token", "OPENROUTER_API_KEY": "or-key"})
+
+    assert settings.judge_model_whore == "x-ai/grok-4.1-fast"
+    assert settings.prompt_translation_engine == "openrouter"
+    assert settings.translation_model == "x-ai/grok-4.1-fast"
+
+
+def test_access_policy_rejects_openai_translation_model_override() -> None:
+    settings = Settings.from_env(
+        {
+            "TELEGRAM_TOKEN": "tg-token",
+            "PROMPT_TRANSLATION_ENGINE": "openrouter",
+            "TRANSLATION_MODEL": "openai/gpt-4o-mini",
+        }
+    )
+    service = AccessPolicyService.alpha_default()
+
+    decision = service.authorize_explicit(
+        ExplicitPolicyInput(
+            mode="whore",
+            capability=ExplicitCapability.TEXT,
+            provider=settings.prompt_translation_engine,
+            model=settings.translation_model,
+        )
+    )
+
+    assert decision.allowed is False
+    assert "openai_model_not_allowed" in decision.reasons
+
+
+def test_access_policy_validates_explicit_settings_models() -> None:
+    service = AccessPolicyService.alpha_default()
+
+    ok_settings = Settings.from_env(
+        {
+            "TELEGRAM_TOKEN": "tg-token",
+            "PROMPT_TRANSLATION_ENGINE": "openrouter",
+            "TRANSLATION_MODEL": "x-ai/grok-4.1-fast",
+            "JUDGE_MODEL_WHORE": "x-ai/grok-4.1-fast",
+        }
+    )
+    service.validate_explicit_settings(ok_settings)
+
+    blocked_settings = Settings.from_env(
+        {
+            "TELEGRAM_TOKEN": "tg-token",
+            "PROMPT_TRANSLATION_ENGINE": "openrouter",
+            "TRANSLATION_MODEL": "openai/gpt-4o-mini",
+            "JUDGE_MODEL_WHORE": "openai/gpt-4o-mini",
+        }
+    )
+    with pytest.raises(ValueError, match="openai_model_not_allowed"):
+        service.validate_explicit_settings(blocked_settings)
 
 
 def test_settings_from_env_parses_values() -> None:

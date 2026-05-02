@@ -28,6 +28,13 @@ ENV_KEYS = {
     "BOT_DB_PATH",
     "DEFAULT_MODEL",
     "OPENROUTER_IMAGE_MODEL",
+    "PROMPT_TRANSLATION_ENABLED",
+    "PROMPT_TRANSLATION_TARGET_LANG",
+    "PROMPT_TRANSLATION_FOR",
+    "PROMPT_TRANSLATION_ENGINE",
+    "TRANSLATION_MODEL",
+    "PROMPT_TRANSLATION_DEBUG",
+    "JUDGE_MODEL_WHORE",
     "DB_BACKEND",
     "DATABASE_URL",
 }
@@ -55,7 +62,14 @@ def module_loader(monkeypatch, tmp_path: Path):
             "OPENROUTER_IMAGE_MODEL": "sourceful/riverflow-v2-max-preview",
             "OPENAI_IMAGE_MODEL": "gpt-image-1",
             "OPENAI_IMAGE_SIZE": "1024x1024",
+            "PROMPT_TRANSLATION_ENABLED": "0",
+            "PROMPT_TRANSLATION_TARGET_LANG": "en",
+            "PROMPT_TRANSLATION_FOR": "modelslab",
+            "PROMPT_TRANSLATION_ENGINE": "openrouter",
+            "TRANSLATION_MODEL": "x-ai/grok-4.1-fast",
+            "PROMPT_TRANSLATION_DEBUG": "0",
             "DEFAULT_MODEL": "openai/gpt-4o-mini",
+            "JUDGE_MODEL_WHORE": "x-ai/grok-4.1-fast",
             "BOT_DB_PATH": str(tmp_path / f"{module_name.replace('.', '_')}.db"),
         }
         if env:

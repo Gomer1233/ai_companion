@@ -46,6 +46,7 @@ from src.prompts.lika_prompt import build_lika_system_prompt
 from src.adapters.http.app import create_app
 from src.adapters.http.dependencies import AppDependencies, ReadinessState
 from src.app.settings import Settings
+from src.core.access_policy import AccessPolicyService, ExplicitCapability, ExplicitPolicyInput
 from src.core.runtime_helpers import (
     call_openrouter_with_meta as shared_call_openrouter_with_meta,
     chunk_text,
@@ -136,8 +137,8 @@ TOG_HEIGHT = int(os.getenv("TOG_HEIGHT", "1024"))
 PROMPT_TRANSLATION_ENABLED = os.getenv("PROMPT_TRANSLATION_ENABLED", "0").strip() == "1"
 PROMPT_TRANSLATION_TARGET_LANG = os.getenv("PROMPT_TRANSLATION_TARGET_LANG", "en").strip()
 PROMPT_TRANSLATION_FOR = {s.strip().lower() for s in os.getenv("PROMPT_TRANSLATION_FOR", "modelslab").split(",") if s.strip()}
-PROMPT_TRANSLATION_ENGINE = os.getenv("PROMPT_TRANSLATION_ENGINE", "openai").strip().lower()
-TRANSLATION_MODEL = os.getenv("TRANSLATION_MODEL", "gpt-4o-mini").strip()
+PROMPT_TRANSLATION_ENGINE = os.getenv("PROMPT_TRANSLATION_ENGINE", "openrouter").strip().lower()
+TRANSLATION_MODEL = os.getenv("TRANSLATION_MODEL", "x-ai/grok-4.1-fast").strip()
 
 PROMPT_TRANSLATION_DEBUG = os.getenv("PROMPT_TRANSLATION_DEBUG", "0").strip() == "1"
 
@@ -183,7 +184,7 @@ SETTINGS = Settings.from_env(project_root=PROJECT_ROOT)
 DB_PATH = SETTINGS.bot_db_path
 DEFAULT_MODEL = os.getenv("DEFAULT_MODEL", "openai/gpt-4o-mini")
 
-JUDGE_MODEL_WHORE = os.getenv("JUDGE_MODEL_WHORE", "openai/gpt-4o-mini").strip()
+JUDGE_MODEL_WHORE = os.getenv("JUDGE_MODEL_WHORE", "x-ai/grok-4.1-fast").strip()
 JUDGE_MAX_TOKENS = int(os.getenv("JUDGE_MAX_TOKENS", "220"))
 
 
@@ -191,6 +192,7 @@ JUDGE_MAX_TOKENS = int(os.getenv("JUDGE_MAX_TOKENS", "220"))
 HISTORY_LIMIT = int(os.getenv("HISTORY_LIMIT", "12"))
 
 DB_REPOSITORIES = create_repositories(SETTINGS, include_relationship_state=True, history_limit=HISTORY_LIMIT)
+ACCESS_POLICY = AccessPolicyService.alpha_default()
 
 
 def _connect_runtime_db():
@@ -439,7 +441,29 @@ async def translate_to_english(text: str) -> str:
     return text
 
 
-async def maybe_translate_prompt(provider: str, prompt: str) -> str:
+async def translate_to_english_openrouter(text: str) -> str:
+    messages = [
+        {
+            "role": "system",
+            "content": (
+                "You are a translation engine. Translate the user's text to natural English.\n"
+                "Return ONLY the translated text, no quotes, no explanations.\n"
+                "Preserve formatting, line breaks, punctuation.\n"
+                "Do NOT translate code, model IDs, LoRA names, URLs, tokens, or weighted prompt fragments.\n"
+                "Keep proper nouns as-is."
+            ),
+        },
+        {"role": "user", "content": text},
+    ]
+    return await call_openrouter(
+        model=TRANSLATION_MODEL,
+        messages=messages,
+        temperature=0.0,
+        max_tokens=700,
+    )
+
+
+async def maybe_translate_prompt(provider: str, prompt: str, *, mode: str = "basic") -> str:
     if PROMPT_TRANSLATION_DEBUG:
         logging.info("[translate][enter] provider=%s enabled=%s target=%s for=%s",
                     provider, PROMPT_TRANSLATION_ENABLED, PROMPT_TRANSLATION_TARGET_LANG, PROMPT_TRANSLATION_FOR)
@@ -454,7 +478,24 @@ async def maybe_translate_prompt(provider: str, prompt: str) -> str:
     if PROMPT_TRANSLATION_TARGET_LANG.lower() != "en":
         return prompt
 
-    translated = await translate_to_english(prompt)
+    if ACCESS_POLICY.is_explicit_mode(mode):
+        decision = ACCESS_POLICY.authorize_explicit(
+            ExplicitPolicyInput(
+                mode=mode,
+                capability=ExplicitCapability.TEXT,
+                provider=PROMPT_TRANSLATION_ENGINE,
+                model=TRANSLATION_MODEL,
+            )
+        )
+        if not decision.allowed:
+            raise RuntimeError(f"Explicit translation blocked: {', '.join(decision.reasons)}")
+
+    if PROMPT_TRANSLATION_ENGINE == "openrouter":
+        translated = await translate_to_english_openrouter(prompt)
+    elif PROMPT_TRANSLATION_ENGINE == "openai":
+        translated = await translate_to_english(prompt)
+    else:
+        raise RuntimeError(f"Unsupported PROMPT_TRANSLATION_ENGINE={PROMPT_TRANSLATION_ENGINE}")
     if PROMPT_TRANSLATION_DEBUG:
         ru = (prompt or "").strip()
         en = (translated or "").strip()
@@ -735,12 +776,33 @@ def set_user_model(user_id: int, model: str) -> None:
         conn.close()
 
 
-async def generate_image_backend(prompt: str) -> bytes:
+async def generate_image_backend(prompt: str, *, mode: str = "basic") -> bytes:
     """
     Единственная точка входа для генерации картинки.
     Переключается только через IMAGE_BACKEND_PROVIDER и env-переменные.
     """
     provider = (IMAGE_BACKEND_PROVIDER or "openrouter").strip().lower()
+    image_model = (
+        MODELSLAB_MODEL_ID
+        if provider == "modelslab"
+        else OPENROUTER_IMAGE_MODEL
+        if provider == "openrouter"
+        else OPENAI_IMAGE_MODEL
+        if provider == "openai"
+        else TOG_IMAGE_MODEL
+        if provider == "together"
+        else ""
+    )
+    decision = ACCESS_POLICY.authorize_explicit(
+        ExplicitPolicyInput(
+            mode=mode,
+            capability=ExplicitCapability.IMAGE,
+            provider=provider,
+            model=image_model,
+        )
+    )
+    if not decision.allowed:
+        raise RuntimeError(f"Explicit image request blocked: {', '.join(decision.reasons)}")
 
     if provider == "openai":
         return await openai_generate_image(prompt, model_override=OPENAI_IMAGE_MODEL)
@@ -749,7 +811,7 @@ async def generate_image_backend(prompt: str) -> bytes:
         return await openrouter_generate_image(prompt, OPENROUTER_IMAGE_MODEL)
 
     if provider == "modelslab":
-        return await modelslab_generate_image(prompt)
+        return await modelslab_generate_image(prompt, mode=mode)
     
     if provider == "together":
         return await together_generate_image(prompt, model=TOG_IMAGE_MODEL)
@@ -1220,15 +1282,15 @@ def _data_url_to_bytes(data_url: str) -> bytes:
 
     return base64.b64decode(b64)
 
-async def modelslab_generate_image(prompt: str) -> bytes:
+async def modelslab_generate_image(prompt: str, *, mode: str = "basic") -> bytes:
     
     if not MODELSLAB_API_KEY:
         raise RuntimeError("Missing MODELSLAB_API_KEY")
     if not MODELSLAB_MODEL_ID:
         raise RuntimeError("Missing MODELSLAB_MODEL_ID")
     
-    prompt = await maybe_translate_prompt("modelslab", prompt)
-    negative = await maybe_translate_prompt("modelslab", MODELSLAB_NEGATIVE_PROMPT)
+    prompt = await maybe_translate_prompt("modelslab", prompt, mode=mode)
+    negative = await maybe_translate_prompt("modelslab", MODELSLAB_NEGATIVE_PROMPT, mode=mode)
 
     payload = {
         "key": MODELSLAB_API_KEY,
@@ -2420,7 +2482,7 @@ async def on_text(message: types.Message):
             ok=1,
         )
 
-        gen_task = asyncio.create_task(generate_image_backend(image_prompt))
+        gen_task = asyncio.create_task(generate_image_backend(image_prompt, mode=mode))
         IMAGE_JOBS[user_id]["gen_task"] = gen_task
 
         try:
