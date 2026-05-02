@@ -11,6 +11,7 @@ Typical ADR topics:
 - migrations are forward-only in the first cycle
 - `photo_gate` is core-state
 
-Do not put drafts or initiative planning here. Drafts belong in:
+Do not put drafts or initiative planning here. Drafts belong in the relevant active planning namespace, such as:
 
 - `docs/current/multichannel-core/**`
+- `docs/current/alpha-launch/**`

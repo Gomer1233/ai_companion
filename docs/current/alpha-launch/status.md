@@ -18,7 +18,9 @@
 - `multichannel-core` remains the completed foundation initiative and should not be overwritten to carry alpha launch planning.
 - Alpha launch planning now lives under `docs/current/alpha-launch/`.
 - `ALPHA-002 FastAPI HTTP Adapter` is merged to `main`.
-- `ALPHA-003 Postgres Backend + Cutover Runbook` is ready for merge review on `codex/alpha-003-postgres-cutover`; P1 review follow-ups are addressed and pushed, but the branch is not merged to `main` yet.
+- `ALPHA-003 Postgres Backend + Cutover Runbook` is merged to `main`.
+- `ALPHA-004 Provider Matrix + Explicit Policy Layer` is in progress on `codex/alpha-004-provider-matrix`.
+- Post-alpha standalone Web direction is captured as an accepted identity/readiness decision: `docs/adr/0002-user-identity-and-standalone-web-readiness.md`.
 
 ## Completed
 
@@ -67,15 +69,20 @@
     - runtime tables now get `lina_app` RLS read/write policies alongside least-privilege grants
     - whore-mode relationship state now routes through repository storage in Postgres mode
     - cutover snapshot/import now covers profile/settings/events/Telegram mappings/legacy state/runtime tables and monetization tables when present
+- `ALPHA-003 Postgres Backend + Cutover Runbook` is merged to `main`
+- `ADR 0002 User Identity And Standalone Web Readiness` accepted:
+  - `UserRef` is the primary product identity
+  - Telegram accounts are linked identities
+  - standalone Web with chat is a post-alpha direction
 
 ## Next Step
 
-Merge `codex/alpha-003-postgres-cutover` after review approval, then start `ALPHA-004 Provider Matrix + Explicit Policy Layer` from updated `main`.
+Continue `ALPHA-004 Provider Matrix + Explicit Policy Layer` from `codex/alpha-004-provider-matrix`.
 
 ## Risks / Notes
 
 - `src/main.py` is still too large, so HTTP integration must stay transport-thin and avoid widening scope into a full launcher rewrite.
 - Explicit launch scope is intentionally conservative on capability surface, but persona scope remains subject to audit freeze.
 - Security baseline assumes no direct browser path to Supabase in alpha v1.
-- Do not start `ALPHA-004` on top of unmerged `ALPHA-003` unless we intentionally choose a stacked branch.
+- Standalone Web with chat is a post-alpha direction. Alpha remains Telegram-first, but `ALPHA-004` through `ALPHA-010` must preserve `UserRef`-first backend contracts and avoid treating Telegram as the product identity model.
 
