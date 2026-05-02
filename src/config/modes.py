@@ -28,7 +28,7 @@ class PersonaSpec:
     premise: str = "Базовый режим."
     
     # LLM runtime params
-    model: str = "google/gemini-2.5-flash-preview-09-2025"
+    model: str = "google/gemini-3-flash-preview"
     temperature: float = 0.75
     max_tokens: int = 750
     frequency_penalty: float = 0.20
@@ -36,17 +36,16 @@ class PersonaSpec:
 # --- MODELS --- #
 # cognitivecomputations/dolphin-mistral-24b-venice-edition:free
 # nousresearch/hermes-4-70b $0.11/M input tokens $0.38/M output tokens
-# nousresearch/deephermes-3-mistral-24b-preview $0.02/M input tokens $0.10/M output tokens
 # nousresearch/hermes-3-llama-3.1-405b $1/M input tokens $1/M output tokens
 # x-ai/grok-4 Starting at $3/M input tokens Starting at $15/M output tokens $5/K web search
 # x-ai/grok-4.1-fast Starting at $0.20/M input tokens Starting at $0.50/M output tokens $5/K web search
 # nousresearch/hermes-3-llama-3.1-70b $0.30/M input tokens $0.30/M output tokens
-# nousresearch/deephermes-3-mistral-24b-preview $0.02/M input tokens $0.10/M output tokens
 # nousresearch/hermes-4-70b $0.11/M input tokens $0.38/M output tokens
 # anthropic/claude-3.5-sonnet $6/M input tokens $30/M output tokens
-# google/gemini-2.5-flash-preview-09-2025
+# google/gemini-3-flash-preview $0.50/M input tokens $3/M output tokens
 # google/gemini-3-flash-preview
-# google/gemini-3-pro-preview
+# google/gemini-3.1-pro-preview
+# 
  
 # ---------------------------
 # ЕДИНСТВЕННАЯ ТОЧКА РЕДАКТИРОВАНИЯ (добавление/удаление персонажей)
@@ -114,7 +113,7 @@ PERSONAS: list[PersonaSpec] = [
         premise="Тренер: дисциплина, план, прогресс, жёстко, но справедливо.",
         title="🏋️ Тренер-СССР",
         prompt_module="coach",
-        model="google/gemini-2.5-flash-preview-09-2025",
+        model="google/gemini-3-flash-preview",
         temperature=0.65,
         max_tokens=650,
         frequency_penalty=0.30,
@@ -129,7 +128,7 @@ PERSONAS: list[PersonaSpec] = [
         ),
         title="💎 Тренер-Premium",
         prompt_module="coach_premium",
-        model="google/gemini-2.5-flash-preview-09-2025",
+        model="google/gemini-3-flash-preview",
         temperature=0.55,
         max_tokens=850,
         frequency_penalty=0.20,
@@ -140,7 +139,7 @@ PERSONAS: list[PersonaSpec] = [
         premise="Помещик XIX века: медленные монологи, сомнения, нравственный поиск, язык эпохи.",
         title="🎩 Помещик XIX века",
         prompt_module="oldtimer",
-        model="nousresearch/deephermes-3-mistral-24b-preview",
+        model="nousresearch/hermes-4-70b",
         temperature=0.75,
         max_tokens=850,
         frequency_penalty=0.20,
@@ -150,7 +149,7 @@ PERSONAS: list[PersonaSpec] = [
         premise="Коммунист СССР: идеологический тон, советская лексика, жёсткая полемика, серьёзно.",
         title="☭ Коммунист СССР",
         prompt_module="communist",
-        model="google/gemini-2.5-flash-preview-09-2025",
+        model="google/gemini-3-flash-preview",
         temperature=0.70,
         max_tokens=750,
         frequency_penalty=0.20,
@@ -160,7 +159,7 @@ PERSONAS: list[PersonaSpec] = [
         premise="Конспиролог-эрудит: версии, сомнения, альтернативные теории. Уверен ли ты в том, что тебе говорят?",
         title="🛸 Конспиролог",
         prompt_module="conspiro",
-        model="google/gemini-2.5-flash-preview-09-2025",
+        model="google/gemini-3-flash-preview",
         temperature=0.75,
         max_tokens=750,
         frequency_penalty=0.20,
@@ -188,7 +187,7 @@ PERSONAS: list[PersonaSpec] = [
             "даёт план обучения и коррекции поведения, советы по уходу и питанию. "
             "Без назначения лечения и без жестоких методов."
         ),
-        model="xiaomi/mimo-v2-flash:free",
+        model="xiaomi/mimo-v2-flash",
         temperature=0.50,
         max_tokens=900,
         frequency_penalty=0.20,
@@ -198,7 +197,7 @@ PERSONAS: list[PersonaSpec] = [
         title="👨‍🍳 Шеф-повар",
         prompt_module="chef",
         premise="Шеф-повар: рецепты, техника, вкусы, подача. Два формата — быстро или ресторан.",
-        model="google/gemini-3-pro-preview",
+        model="google/gemini-3-flash-preview",
         temperature=0.55,
         max_tokens=1800,
         frequency_penalty=0.20,

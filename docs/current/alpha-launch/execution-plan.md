@@ -17,6 +17,7 @@
 - Один backend truth, один Telegram bot launcher, один access-policy слой.
 - Бот остаётся `bot-first`; Mini App не забирает основной чат в alpha v1.
 - User-facing web surfaces use the `Lina Midnight Channel UI` visual contract from `docs/adr/0001-lina-midnight-channel-ui.md`; Mini App is the first implementation, and future standalone Web should extend the same direction.
+- User identity follows `docs/adr/0002-user-identity-and-standalone-web-readiness.md`: `UserRef` is the primary product identity; Telegram accounts are linked identities, not the product user model.
 - Railway хостит Python backend service: bot runtime + HTTP API.
 - Vercel хостит только Mini App frontend.
 - Mini App ходит напрямую: `browser -> Railway API`.
@@ -29,6 +30,7 @@
 - Persona candidate set alpha v1 = текущие персонажи из `src/config/modes.py`; финальный launch allowlist определяется отдельным persona audit перед launch freeze.
 - Launch behavior фиксируется не только allowlist, но и frozen launch model manifest.
 - Webhook не входит в alpha critical path.
+- Standalone Web with chat is a post-alpha direction; `ALPHA-004` through `ALPHA-010` must preserve Web-ready backend contracts and must not hard-code Telegram as the only identity provider.
 - `RLS` в alpha рассматривается как defense-in-depth, а не как основной auth boundary.
 
 ## Security Baseline
@@ -445,6 +447,17 @@ Compliance начинается во время Track 4-8, а этот шаг я
 9. `Compliance Completion + Alpha Ops`
 10. `Deploy to Railway + Vercel + Supabase`
 
+## Post-Alpha Web Direction
+
+Не включать standalone Web в alpha launch scope, но сохранить путь к нему:
+
+1. `WEB-001 Standalone Web Identity`
+2. `WEB-002 Standalone Web Shell`
+3. `WEB-003 Web Chat`
+4. `WEB-004 Web Monetization`
+
+Standalone Web должен использовать тот же Railway backend truth, тот же `UserRef`, тот же access/consent/entitlement state и visual direction из `docs/adr/0001-lina-midnight-channel-ui.md`.
+
 ## Test Plan
 
 - Launcher tests подтверждают, что `src/main.py` больше не содержит прямых SQLite paths.
@@ -491,6 +504,8 @@ Compliance начинается во время Track 4-8, а этот шаг я
 - Webhook не нужен для alpha v1; polling на Railway остаётся дефолтом.
 - Railway — фиксированный runtime choice для Python backend.
 - Vercel — только Mini App frontend.
+- `UserRef` — основной product identity; Telegram account является linked identity provider, а не главным user id продукта.
+- Standalone Web with chat планируется после alpha deploy и не требует перехода на webhook.
 - `src/adapters/http/**` — фиксированный путь для Python HTTP adapter.
 - FastAPI — фиксированный HTTP stack.
 - Mini App transport path фиксирован: `browser -> Railway API` directly.

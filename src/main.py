@@ -1995,9 +1995,9 @@ async def cmd_model(message: types.Message):
 
 def build_chef_submode_keyboard() -> InlineKeyboardMarkup:
     rows = [
-        [InlineKeyboardButton(text="?? ?????? ??-?????????", callback_data="chefmode:home")],
-        [InlineKeyboardButton(text="?? ??? ? ?????????", callback_data="chefmode:restaurant")],
-        [InlineKeyboardButton(text="?? ????????? ????????", callback_data="remindctx")],
+        [InlineKeyboardButton(text="🏠 Быстро по-домашнему", callback_data="chefmode:home")],
+        [InlineKeyboardButton(text="🍽️ Как в ресторане", callback_data="chefmode:restaurant")],
+        [InlineKeyboardButton(text="🧠 Вспомнить контекст", callback_data="remindctx")],
     ]
     return InlineKeyboardMarkup(inline_keyboard=rows)
 
@@ -2015,7 +2015,7 @@ def build_rap_submode_keyboard(current: str | None = None) -> InlineKeyboardMark
             btn("?? STORY", "story"),
             btn("?? LYRICAL", "lyrical"),
         ],
-        [InlineKeyboardButton(text="?? ????????? ????????", callback_data="remindctx")],
+        [InlineKeyboardButton(text="🧠 Вспомнить контекст", callback_data="remindctx")],
     ]
     return InlineKeyboardMarkup(inline_keyboard=rows)
 

@@ -27,6 +27,23 @@ from src.core.contracts import (
 )
 
 
+def test_persona_models_do_not_use_known_unavailable_openrouter_ids() -> None:
+    from src.config.modes import MODE_TO_MODEL
+
+    unavailable = {
+        "google/gemini-3-pro-preview",
+        "google/gemini-2.5-flash-preview-09-2025",
+        "nousresearch/deephermes-3-mistral-24b-preview",
+        "xiaomi/mimo-v2-flash:free",
+    }
+
+    configured_unavailable = {
+        mode: model for mode, model in MODE_TO_MODEL.items() if model in unavailable
+    }
+
+    assert configured_unavailable == {}
+
+
 def test_settings_from_env_parses_values() -> None:
     settings = Settings.from_env(
         {
