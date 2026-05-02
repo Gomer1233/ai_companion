@@ -62,8 +62,23 @@ class ExplicitPolicyInput:
     moderation_categories: tuple[ExplicitModerationCategory, ...] = ()
 
 
+BARE_OPENAI_MODEL_PREFIXES = (
+    "gpt-",
+    "gpt_",
+    "gpt4",
+    "gpt3",
+    "o1",
+    "o3",
+    "o4",
+    "dall-e",
+    "tts-",
+    "whisper-",
+)
+
+
 def is_openai_model_id(model: str) -> bool:
-    return model.strip().lower().startswith("openai/")
+    normalized = model.strip().lower()
+    return normalized.startswith("openai/") or normalized.startswith(BARE_OPENAI_MODEL_PREFIXES)
 
 
 @dataclass(frozen=True, slots=True)

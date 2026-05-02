@@ -1,9 +1,12 @@
 from __future__ import annotations
 
 import sqlite3
+from types import SimpleNamespace
 from unittest.mock import AsyncMock
 
 import pytest
+
+from tests.support import FakeMessage
 
 
 def index_exists(db_path: str, index_name: str) -> bool:
@@ -113,6 +116,31 @@ async def test_explicit_prompt_translation_uses_openrouter_engine(module_loader,
 
     assert translated == "hello"
     translator.assert_awaited_once()
+
+
+@pytest.mark.asyncio
+async def test_explicit_text_flow_rejects_blocked_policy_before_openrouter(
+    module_loader,
+    mark_mode_picked,
+    monkeypatch,
+):
+    module = module_loader("src.main")
+    module.init_db()
+    mark_mode_picked(module, 1, mode="whore")
+    monkeypatch.setattr(module, "keep_typing", AsyncMock())
+    llm = AsyncMock(return_value=("blocked bypass", "stop", {"total_tokens": 1}))
+    monkeypatch.setattr(module, "call_openrouter_with_meta", llm)
+
+    class BlockingPolicy:
+        def authorize_explicit(self, request):
+            return SimpleNamespace(allowed=False, reasons=("provider_not_allowed",))
+
+    monkeypatch.setattr(module, "ACCESS_POLICY", BlockingPolicy())
+
+    with pytest.raises(RuntimeError, match="Explicit text request blocked"):
+        await module.on_text(FakeMessage("hello"))
+
+    llm.assert_not_awaited()
 
 
 def test_chef_submode_keyboard_uses_readable_labels(module_loader):

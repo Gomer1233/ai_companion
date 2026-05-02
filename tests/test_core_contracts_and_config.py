@@ -111,6 +111,32 @@ def test_access_policy_rejects_openai_model_ids_even_when_provider_is_openrouter
     assert "openai_model_not_allowed" in decision.reasons
 
 
+def test_access_policy_rejects_bare_openai_model_ids() -> None:
+    service = AccessPolicyService.alpha_default()
+
+    text_decision = service.authorize_explicit(
+        ExplicitPolicyInput(
+            mode="whore",
+            capability=ExplicitCapability.TEXT,
+            provider="openrouter",
+            model="gpt-4o-mini",
+        )
+    )
+    image_decision = service.authorize_explicit(
+        ExplicitPolicyInput(
+            mode="whore",
+            capability=ExplicitCapability.IMAGE,
+            provider="modelslab",
+            model="gpt-image-1",
+        )
+    )
+
+    assert text_decision.allowed is False
+    assert image_decision.allowed is False
+    assert "openai_model_not_allowed" in text_decision.reasons
+    assert "openai_model_not_allowed" in image_decision.reasons
+
+
 def test_access_policy_enforces_explicit_moderation_blocks() -> None:
     service = AccessPolicyService.alpha_default()
 

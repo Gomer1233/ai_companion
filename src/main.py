@@ -46,7 +46,11 @@ from src.prompts.lika_prompt import build_lika_system_prompt
 from src.adapters.http.app import create_app
 from src.adapters.http.dependencies import AppDependencies, ReadinessState
 from src.app.settings import Settings
-from src.core.access_policy import AccessPolicyService, ExplicitCapability, ExplicitPolicyInput
+from src.core.access_policy import (
+    AccessPolicyService,
+    ExplicitCapability,
+    ExplicitPolicyInput,
+)
 from src.core.runtime_helpers import (
     call_openrouter_with_meta as shared_call_openrouter_with_meta,
     chunk_text,
@@ -2602,6 +2606,16 @@ async def on_text(message: types.Message):
         return
 
     model = MODE_TO_MODEL.get(mode, DEFAULT_MODEL)
+    text_decision = ACCESS_POLICY.authorize_explicit(
+        ExplicitPolicyInput(
+            mode=mode,
+            capability=ExplicitCapability.TEXT,
+            provider="openrouter",
+            model=model,
+        )
+    )
+    if not text_decision.allowed:
+        raise RuntimeError(f"Explicit text request blocked: {', '.join(text_decision.reasons)}")
 
     state = get_mode_state(user_id, mode)
 
