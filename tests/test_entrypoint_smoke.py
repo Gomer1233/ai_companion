@@ -61,6 +61,19 @@ def test_supported_image_provider_configs_import(module_loader, provider, extra_
     assert module.IMAGE_BACKEND_PROVIDER == provider
 
 
+def test_chef_submode_keyboard_uses_readable_labels(module_loader):
+    module = module_loader("src.main")
+
+    keyboard = module.build_chef_submode_keyboard()
+    labels = [row[0].text for row in keyboard.inline_keyboard]
+
+    assert labels == [
+        "🏠 Быстро по-домашнему",
+        "🍽️ Как в ресторане",
+        "🧠 Вспомнить контекст",
+    ]
+
+
 def test_unsupported_image_provider_fails_fast(module_loader):
     with pytest.raises(RuntimeError, match="Unsupported IMAGE_BACKEND_PROVIDER"):
         module_loader("src.main", env={"IMAGE_BACKEND_PROVIDER": "replicate"})
