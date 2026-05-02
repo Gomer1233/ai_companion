@@ -1,9 +1,12 @@
 from __future__ import annotations
 
+import time
+
 from fastapi import APIRouter, HTTPException, Request, status
 
 from src.adapters.http.dependencies import require_session
 from src.config.modes import MODE_CATALOG
+from src.core.monetization import MonetizationService, Tier
 
 
 router = APIRouter(prefix="/api")
@@ -27,21 +30,38 @@ def characters(request: Request) -> dict[str, list[dict[str, str]]]:
 
 
 @router.get("/entitlements")
-def entitlements(request: Request) -> dict[str, bool]:
-    require_session(request)
+def entitlements(request: Request) -> dict[str, object]:
+    session = require_session(request)
+    dependencies = request.app.state.dependencies
+    snapshot = MonetizationService(dependencies.repositories).get_access_snapshot(session.user_ref, now_ts=int(time.time()))
     return {
-        "has_premium": False,
-        "consent_required": False,
+        "tier": snapshot.effective_tier.value,
+        "tier_expires_at": snapshot.tier_expires_at,
+        "has_premium": snapshot.effective_tier == Tier.PREMIUM,
+        "explicit_consent": snapshot.explicit_consent,
+        "consent_required": not snapshot.explicit_consent,
+        "blocked_reasons": list(snapshot.blocked_reasons),
     }
 
 
 @router.get("/usage")
-def usage(request: Request) -> dict[str, int]:
+def usage(request: Request) -> dict[str, object]:
     dependencies = request.app.state.dependencies
-    require_session(request)
+    session = require_session(request)
+    snapshot = MonetizationService(dependencies.repositories).get_access_snapshot(session.user_ref, now_ts=int(time.time()))
     return {
         "history_limit": dependencies.repositories.history_limit,
         "image_cooldown_sec": dependencies.settings.image_cooldown_sec,
+        "messages": {
+            "used": snapshot.usage.messages_used,
+            "limit": snapshot.limits.messages_per_day,
+            "reset_at": snapshot.usage.reset_at,
+        },
+        "explicit_images": {
+            "used": snapshot.usage.explicit_images_used,
+            "limit": snapshot.limits.explicit_images_per_day,
+            "reset_at": snapshot.usage.reset_at,
+        },
     }
 
 
