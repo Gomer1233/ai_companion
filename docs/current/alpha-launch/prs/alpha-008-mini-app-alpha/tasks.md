@@ -2,6 +2,7 @@
 
 - [ ] Add the Next.js Telegram Mini App frontend.
 - [ ] Implement the `Lina Midnight Channel UI` visual contract from `docs/adr/0001-lina-midnight-channel-ui.md`.
+- [ ] Match the approved mobile channel-guide calibration: OSD header, access/pass panel, channel rows, restricted 18+ row, and bottom navigation.
 - [ ] Implement session exchange and silent re-auth behavior.
 - [ ] Build the channel-guide catalog, selected-channel preview, profile, limits, and locked-state screens.
 - [ ] Build onboarding and 18+ consent UX using restricted-channel access language.
