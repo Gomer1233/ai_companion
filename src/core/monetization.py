@@ -212,6 +212,7 @@ class MonetizationRepositories(Protocol):
     ) -> PaymentOrder: ...
     def mark_payment_order_refunded(self, order_id: str, *, refunded_at: int) -> PaymentOrder: ...
     def mark_payment_order_cancelled(self, order_id: str, *, cancelled_at: int) -> PaymentOrder: ...
+    def mark_payment_order_failed(self, order_id: str, *, error_code: str) -> PaymentOrder: ...
     def fulfill_paid_order_transactionally(self, order_id: str, *, now_ts: int) -> Entitlement: ...
     def upsert_entitlement(
         self,
@@ -341,6 +342,12 @@ class MonetizationService:
             return AccessDecision(False, ("explicit_image_limit_reached",))
         return AccessDecision(True)
 
+    def can_send_message(self, user_ref: UserRef, now_ts: int) -> AccessDecision:
+        snapshot = self.get_access_snapshot(user_ref, now_ts)
+        if snapshot.usage.messages_used >= snapshot.limits.messages_per_day:
+            return AccessDecision(False, ("message_limit_reached",))
+        return AccessDecision(True)
+
     def record_message_usage(self, user_ref: UserRef, now_ts: int) -> int:
         window_start, window_end = self._daily_window(now_ts)
         return self.repositories.increment_usage(user_ref, "messages", window_start=window_start, window_end=window_end)
@@ -409,6 +416,12 @@ class MonetizationService:
     def mark_order_cancelled(self, order_id: str, *, cancelled_at: int) -> PaymentOrder:
         return self.repositories.mark_payment_order_cancelled(order_id, cancelled_at=cancelled_at)
 
+    def mark_order_failed(self, order_id: str, *, error_code: str) -> PaymentOrder:
+        return self.repositories.mark_payment_order_failed(order_id, error_code=error_code)
+
+    def has_lifetime_capacity(self) -> bool:
+        return self._lifetime_entitlement_count() < 100
+
     def user_payment_actions(self, order_id: str) -> tuple[str, ...]:
         order = self.repositories.load_payment_order(order_id)
         if order is None:
@@ -432,7 +445,7 @@ class MonetizationService:
     ) -> Entitlement:
         resolved_tier = Tier(tier)
         resolved_product_id = ProductId(product_id) if product_id is not None else None
-        if resolved_product_id == ProductId.LIFETIME_PREMIUM_100 and self._manual_lifetime_count() >= 100:
+        if resolved_product_id == ProductId.LIFETIME_PREMIUM_100 and not self.has_lifetime_capacity():
             raise ValueError("lifetime_cap_reached")
         metadata: dict[str, object] = {}
         if messages_per_day is not None:
@@ -600,7 +613,7 @@ class MonetizationService:
     def _is_explicit_persona(persona: str) -> bool:
         return persona == "whore"
 
-    def _manual_lifetime_count(self) -> int:
+    def _lifetime_entitlement_count(self) -> int:
         entitlements = getattr(self.repositories, "load_manual_lifetime_entitlement_count", None)
         if entitlements is not None:
             return int(entitlements())

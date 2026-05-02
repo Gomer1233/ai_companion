@@ -1227,6 +1227,25 @@ class SQLiteRepositories:
             raise ValueError("payment_order_not_found")
         return order
 
+    def mark_payment_order_failed(self, order_id: str, *, error_code: str) -> PaymentOrder:
+        conn = self._connect()
+        try:
+            conn.execute(
+                """
+                UPDATE payment_orders
+                SET status=?, error_code=?
+                WHERE order_id=?
+                """,
+                (PaymentStatus.FAILED.value, error_code, order_id),
+            )
+            conn.commit()
+        finally:
+            conn.close()
+        order = self.load_payment_order(order_id)
+        if order is None:
+            raise ValueError("payment_order_not_found")
+        return order
+
     def fulfill_paid_order_transactionally(self, order_id: str, *, now_ts: int) -> Entitlement:
         conn = self._connect()
         try:
@@ -1271,11 +1290,30 @@ class SQLiteRepositories:
                     if order.product_id == ProductId.LIFETIME_PREMIUM_100:
                         count_row = conn.execute(
                             """
-                            SELECT COUNT(*)
-                            FROM payment_orders
-                            WHERE product_id=? AND status=?
+                            SELECT
+                              (
+                                SELECT COUNT(*)
+                                FROM entitlements
+                                WHERE plan_id=? AND status='active' AND revoked_at IS NULL
+                              ) + (
+                                SELECT COUNT(*)
+                                FROM payment_orders orders
+                                WHERE orders.product_id=? AND orders.status=?
+                                  AND NOT EXISTS (
+                                    SELECT 1
+                                    FROM entitlements ent
+                                    WHERE ent.entitlement_id=orders.entitlement_id
+                                      AND ent.plan_id=orders.product_id
+                                      AND ent.status='active'
+                                      AND ent.revoked_at IS NULL
+                                  )
+                              )
                             """,
-                            (ProductId.LIFETIME_PREMIUM_100.value, PaymentStatus.FULFILLED.value),
+                            (
+                                ProductId.LIFETIME_PREMIUM_100.value,
+                                ProductId.LIFETIME_PREMIUM_100.value,
+                                PaymentStatus.FULFILLED.value,
+                            ),
                         ).fetchone()
                         if int(count_row[0] if count_row else 0) >= 100:
                             raise ValueError("lifetime_cap_reached")
@@ -1413,11 +1451,30 @@ class SQLiteRepositories:
         try:
             row = conn.execute(
                 """
-                SELECT COUNT(*)
-                FROM entitlements
-                WHERE plan_id=? AND status='active' AND revoked_at IS NULL
+                SELECT
+                  (
+                    SELECT COUNT(*)
+                    FROM entitlements
+                    WHERE plan_id=? AND status='active' AND revoked_at IS NULL
+                  ) + (
+                    SELECT COUNT(*)
+                    FROM payment_orders orders
+                    WHERE orders.product_id=? AND orders.status=?
+                      AND NOT EXISTS (
+                        SELECT 1
+                        FROM entitlements ent
+                        WHERE ent.entitlement_id=orders.entitlement_id
+                          AND ent.plan_id=orders.product_id
+                          AND ent.status='active'
+                          AND ent.revoked_at IS NULL
+                      )
+                  )
                 """,
-                (ProductId.LIFETIME_PREMIUM_100.value,),
+                (
+                    ProductId.LIFETIME_PREMIUM_100.value,
+                    ProductId.LIFETIME_PREMIUM_100.value,
+                    PaymentStatus.FULFILLED.value,
+                ),
             ).fetchone()
         finally:
             conn.close()

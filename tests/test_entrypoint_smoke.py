@@ -442,6 +442,23 @@ def test_runtime_monetization_helpers_gate_personas_and_record_usage(module_load
     assert snapshot.usage.messages_used == 1
 
 
+@pytest.mark.asyncio
+async def test_text_handler_rejects_when_daily_message_limit_is_reached(module_loader, monkeypatch):
+    module = module_loader("src.main")
+    module.init_db()
+    monkeypatch.setattr(module.time, "time", lambda: 86_500)
+    user_ref = module.legacy_user_ref(61035)
+    for _ in range(30):
+        module._monetization_service().record_message_usage(user_ref, now_ts=86_500)
+    message = FakeMessage("hello", user_id=61035)
+
+    await module.on_text(message)
+
+    assert message.answers
+    assert "лимит" in message.answers[-1]["text"].lower()
+    assert module.get_history(61035, "basic") == []
+
+
 def test_runtime_explicit_image_gate_blocks_after_limit(module_loader):
     module = module_loader("src.main")
     module.init_db()

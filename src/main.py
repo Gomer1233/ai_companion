@@ -2895,6 +2895,10 @@ async def on_text(message: types.Message):
     if not persona_decision.allowed:
         await message.answer("Доступ к этому персонажу сейчас закрыт.")
         return
+    message_decision = _monetization_service().can_send_message(legacy_user_ref(user_id), now_ts=now)
+    if not message_decision.allowed:
+        await message.answer("Дневной лимит сообщений по тарифу исчерпан. Проверь остаток по тарифу или обнови доступ.")
+        return
 
     locked, reason = is_mode_locked(user_id, mode)
     if locked:

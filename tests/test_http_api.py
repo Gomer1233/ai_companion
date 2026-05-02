@@ -13,7 +13,7 @@ from src.adapters.http.app import create_app
 from src.adapters.http.dependencies import AppDependencies, ReadinessState
 from src.app.settings import Settings
 from src.core.contracts import DeferredJob, JobStatus, JobType, UserRef
-from src.core.monetization import MonetizationService, PaymentProvider, ProductId, Tier
+from src.core.monetization import MonetizationService, PaymentProvider, PaymentStatus, ProductId, Tier
 from src.core.payment_providers import TBankSignature
 from src.db.migrations import migrate_database
 from src.db.repositories import SQLiteRepositories
@@ -207,10 +207,42 @@ def test_tbank_webhook_confirms_paid_order_and_fulfills(tmp_path: Path) -> None:
     response = client.post("/api/payments/tbank/webhook", json=payload)
 
     assert response.status_code == 200
-    assert response.json() == {"status": "OK"}
+    assert response.text == "OK"
     loaded = deps.repositories.load_payment_order(order.order_id)
     assert loaded.entitlement_id is not None
     assert loaded.provider_payment_id == "payment-206"
+
+
+def test_tbank_webhook_marks_failed_status(tmp_path: Path) -> None:
+    client, deps = _make_client(
+        tmp_path,
+        TBANK_PASSWORD="secret",
+        TBANK_TERMINAL_KEY="terminal",
+    )
+    service = MonetizationService(deps.repositories)
+    order = service.create_payment_order(
+        UserRef("208"),
+        PaymentProvider.TBANK,
+        ProductId.PREMIUM_30D,
+        now_ts=10_000,
+    )
+    payload = {
+        "TerminalKey": "terminal",
+        "OrderId": order.order_id,
+        "Success": False,
+        "Status": "REJECTED",
+        "PaymentId": "payment-208",
+        "Amount": order.amount_minor,
+    }
+    payload["Token"] = TBankSignature.make_token(payload, "secret")
+
+    response = client.post("/api/payments/tbank/webhook", json=payload)
+
+    assert response.status_code == 200
+    assert response.text == "OK"
+    loaded = deps.repositories.load_payment_order(order.order_id)
+    assert loaded.status == PaymentStatus.FAILED
+    assert loaded.error_code == "REJECTED"
 
 
 def test_tbank_webhook_rejects_bad_signature(tmp_path: Path) -> None:

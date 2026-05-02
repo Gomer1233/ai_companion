@@ -95,6 +95,8 @@ def validate_pre_checkout_payload(service: MonetizationService, payload: str) ->
         return PreCheckoutDecision(False, "product_mismatch")
     if order.provider != PaymentProvider.TELEGRAM_STARS:
         return PreCheckoutDecision(False, "provider_mismatch")
+    if order.product_id == ProductId.LIFETIME_PREMIUM_100 and not service.has_lifetime_capacity():
+        return PreCheckoutDecision(False, "lifetime_cap_reached")
     return PreCheckoutDecision(True)
 
 

@@ -273,6 +273,30 @@ def test_manual_lifetime_grant_counts_against_lifetime_cap(tmp_path) -> None:
         )
 
 
+def test_paid_lifetime_fulfillment_counts_manual_grants_against_cap(tmp_path) -> None:
+    _, service = _make_service(tmp_path)
+    for index in range(100):
+        service.grant_manual_access(
+            operator_ref=UserRef("9001"),
+            target_ref=UserRef(str(65000 + index)),
+            tier=Tier.PREMIUM,
+            now_ts=95_000 + index,
+            duration_days=None,
+            reason="lifetime",
+            product_id=ProductId.LIFETIME_PREMIUM_100,
+        )
+    order = service.create_payment_order(
+        UserRef("65101"),
+        PaymentProvider.TELEGRAM_STARS,
+        ProductId.LIFETIME_PREMIUM_100,
+        now_ts=96_000,
+    )
+    service.mark_order_paid(order.order_id, provider_payment_id="stars-paid-cap", provider_payload={}, paid_at=96_010)
+
+    with pytest.raises(ValueError, match="lifetime_cap_reached"):
+        service.fulfill_paid_order(order.order_id, now_ts=96_020)
+
+
 def test_revoke_manual_access_writes_audit(tmp_path) -> None:
     repo, service = _make_service(tmp_path)
     target_ref = UserRef("61012")

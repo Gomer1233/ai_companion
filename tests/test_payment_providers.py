@@ -73,6 +73,36 @@ def test_pre_checkout_rejects_unknown_or_mismatched_order(tmp_path) -> None:
     assert decision.reason == "product_mismatch"
 
 
+def test_pre_checkout_rejects_lifetime_when_cap_is_full(tmp_path) -> None:
+    from src.adapters.telegram.payments import validate_pre_checkout_payload
+
+    _, service = _make_service(tmp_path)
+    for index in range(100):
+        service.grant_manual_access(
+            operator_ref=UserRef("9001"),
+            target_ref=UserRef(str(64000 + index)),
+            tier="premium",
+            now_ts=10_000 + index,
+            duration_days=None,
+            reason="manual_lifetime",
+            product_id=ProductId.LIFETIME_PREMIUM_100,
+        )
+    order = service.create_payment_order(
+        UserRef("64101"),
+        PaymentProvider.TELEGRAM_STARS,
+        ProductId.LIFETIME_PREMIUM_100,
+        now_ts=20_000,
+    )
+
+    decision = validate_pre_checkout_payload(
+        service,
+        build_payload(order_id=order.order_id, product_id=ProductId.LIFETIME_PREMIUM_100),
+    )
+
+    assert not decision.allowed
+    assert decision.reason == "lifetime_cap_reached"
+
+
 def test_successful_payment_marks_order_paid_and_fulfills_once(tmp_path) -> None:
     from src.adapters.telegram.payments import fulfill_successful_stars_payment
 
