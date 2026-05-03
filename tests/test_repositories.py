@@ -99,6 +99,50 @@ def test_job_transitions_block_cancelled_to_completed_or_failed(tmp_path) -> Non
         repo.update_job_status("job-1", JobStatus.FAILED, error_code="late-failure")
 
 
+def test_reconcile_stale_jobs_marks_non_terminal_jobs_failed(tmp_path) -> None:
+    _, repo = _make_repo(tmp_path)
+    user_ref = UserRef("109")
+    conv = repo.ensure_default_conversation(user_ref)
+    stale_ts = 10_000
+    fresh_ts = 20_000
+
+    for job_id, status, updated_at in (
+        ("queued-stale", JobStatus.QUEUED, stale_ts),
+        ("running-stale", JobStatus.RUNNING, stale_ts),
+        ("running-fresh", JobStatus.RUNNING, fresh_ts),
+        ("completed-stale", JobStatus.COMPLETED, stale_ts),
+        ("cancelled-stale", JobStatus.CANCELLED, stale_ts),
+    ):
+        repo.create_job(
+            DeferredJob(
+                job_id=job_id,
+                user_ref=user_ref,
+                conversation_ref=conv.conversation_ref,
+                mode="basic",
+                job_type=JobType.IMAGE,
+                status=status,
+                progress=50,
+                created_at=updated_at,
+                updated_at=updated_at,
+            )
+        )
+
+    reconciled = repo.reconcile_stale_jobs(
+        now_ts=30_000,
+        stale_before_ts=15_000,
+        error_code="stale_on_startup",
+    )
+
+    assert reconciled == 2
+    assert repo.load_job("queued-stale").status == JobStatus.FAILED
+    assert repo.load_job("queued-stale").error_code == "stale_on_startup"
+    assert repo.load_job("queued-stale").updated_at == 30_000
+    assert repo.load_job("running-stale").status == JobStatus.FAILED
+    assert repo.load_job("running-fresh").status == JobStatus.RUNNING
+    assert repo.load_job("completed-stale").status == JobStatus.COMPLETED
+    assert repo.load_job("cancelled-stale").status == JobStatus.CANCELLED
+
+
 def test_reset_mode_in_conversation_clears_only_mode_bound_state(tmp_path) -> None:
     _, repo = _make_repo(tmp_path)
     user_ref = UserRef("104")

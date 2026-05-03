@@ -159,9 +159,10 @@ def test_entitlements_and_usage_return_real_monetization_state(tmp_path: Path) -
 
 
 def test_jobs_endpoint_is_owner_only(tmp_path: Path) -> None:
-    client, deps = _make_client(tmp_path)
+    client, deps = _make_client(tmp_path, OPERATOR_TELEGRAM_IDS="9001")
     owner_token = _issue_token(client, deps.settings.telegram_token, 204)
     other_token = _issue_token(client, deps.settings.telegram_token, 205)
+    operator_token = _issue_token(client, deps.settings.telegram_token, 9001)
     owner_ref = UserRef("204")
     conversation = deps.repositories.ensure_default_conversation(owner_ref)
     now_ts = int(time.time())
@@ -181,11 +182,14 @@ def test_jobs_endpoint_is_owner_only(tmp_path: Path) -> None:
 
     owner = client.get("/api/jobs/job-204", headers={"Authorization": f"Bearer {owner_token}"})
     stranger = client.get("/api/jobs/job-204", headers={"Authorization": f"Bearer {other_token}"})
+    operator = client.get("/api/jobs/job-204", headers={"Authorization": f"Bearer {operator_token}"})
     missing = client.get("/api/jobs/missing-job", headers={"Authorization": f"Bearer {owner_token}"})
 
     assert owner.status_code == 200
     assert owner.json()["job_id"] == "job-204"
     assert stranger.status_code == 404
+    assert operator.status_code == 200
+    assert operator.json()["job_id"] == "job-204"
     assert missing.status_code == 404
 
 

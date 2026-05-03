@@ -778,6 +778,22 @@ class SQLiteRepositories:
         finally:
             conn.close()
 
+    def reconcile_stale_jobs(self, *, now_ts: int, stale_before_ts: int, error_code: str) -> int:
+        conn = self._connect()
+        try:
+            cursor = conn.execute(
+                """
+                UPDATE jobs
+                SET status=?, error_code=?, updated_at=?
+                WHERE status IN ('queued', 'running') AND updated_at <= ?
+                """,
+                (JobStatus.FAILED.value, error_code, now_ts, stale_before_ts),
+            )
+            conn.commit()
+            return int(cursor.rowcount or 0)
+        finally:
+            conn.close()
+
     def load_relationship_state(
         self,
         user_ref: UserRef,
