@@ -60,6 +60,8 @@ from src.core.access_policy import (
     ExplicitPolicyInput,
 )
 from src.core.contracts import UserRef
+from src.core.contracts import DeferredJob, JobStatus, JobType
+from src.core.jobs import new_job_id
 from src.core.monetization import AccessDecision, AccessSnapshot, MonetizationService
 from src.core.monetization import PaymentProvider, ProductId, Tier
 from src.core.runtime_helpers import (
@@ -243,6 +245,15 @@ def record_runtime_explicit_image_usage(user_id: int, *, now_ts: int | None = No
     return _monetization_service().record_explicit_image_usage(
         legacy_user_ref(user_id),
         now_ts=int(time.time()) if now_ts is None else now_ts,
+    )
+
+
+def reconcile_runtime_jobs(*, now_ts: int | None = None, stale_after_sec: int = 0) -> int:
+    resolved_now = int(time.time()) if now_ts is None else now_ts
+    return DB_REPOSITORIES.reconcile_stale_jobs(
+        now_ts=resolved_now,
+        stale_before_ts=resolved_now - stale_after_sec,
+        error_code="stale_on_startup",
     )
 
 
@@ -2707,6 +2718,12 @@ async def on_text(message: types.Message):
         if job:
             cancel_event: asyncio.Event = job["cancel_event"]
             cancel_event.set()
+            job_id = job.get("job_id")
+            if job_id:
+                try:
+                    DB_REPOSITORIES.update_job_status(str(job_id), JobStatus.CANCELLED, error_code="cancelled")
+                except (KeyError, ValueError):
+                    pass
 
             gen_task: asyncio.Task | None = job.get("gen_task")
             if gen_task and not gen_task.done():
@@ -2741,6 +2758,27 @@ async def on_text(message: types.Message):
             await message.answer(f"Кулдаун. Подожди ещё {left // 60 + 1} мин.")
             return
 
+        image_decision = authorize_runtime_explicit_image(user_id) if ACCESS_POLICY.is_explicit_mode(mode) else AccessDecision(True)
+        if not image_decision.allowed:
+            await message.answer("Лимит или доступ к explicit-картинкам сейчас недоступен.")
+            return
+
+        user_ref, conversation_ref = _repo_refs(user_id)
+        job_id = new_job_id()
+        DB_REPOSITORIES.create_job(
+            DeferredJob(
+                job_id=job_id,
+                user_ref=user_ref,
+                conversation_ref=conversation_ref,
+                mode=mode,
+                job_type=JobType.IMAGE,
+                status=JobStatus.RUNNING,
+                progress=0,
+                created_at=now,
+                updated_at=now,
+            )
+        )
+
         # Сразу выходим из режима ожидания промпта, чтобы не запускать генерацию повторно
         upsert_photo_gate(
             user_id=user_id,
@@ -2757,17 +2795,13 @@ async def on_text(message: types.Message):
 
         # Регистрируем активную задачу (HARD LOCK выше начнёт игнорировать любые новые сообщения)
         cancel_event = asyncio.Event()
-        IMAGE_JOBS[user_id] = {"cancel_event": cancel_event, "status_task": None, "gen_task": None}
+        IMAGE_JOBS[user_id] = {"cancel_event": cancel_event, "status_task": None, "gen_task": None, "job_id": job_id}
 
         # 1) Параллельно крутим ТОЛЬКО смешные фразы (каждая живёт 2 сек и распыляется)
         status_task = asyncio.create_task(run_image_fun_only_loop(bot, message.chat.id, cancel_event))
         IMAGE_JOBS[user_id]["status_task"] = status_task
 
         # 2) Запускаем генерацию
-        image_decision = authorize_runtime_explicit_image(user_id) if ACCESS_POLICY.is_explicit_mode(mode) else AccessDecision(True)
-        if not image_decision.allowed:
-            await message.answer("Лимит или доступ к explicit-картинкам сейчас недоступен.")
-            return
         style_hint = MODE_TO_IMAGE_STYLE.get(mode, MODE_TO_IMAGE_STYLE["basic"])
 
         image_prompt = f"Стиль/арт-дирекшн: {style_hint}\nЗапрос пользователя: {user_text}"
@@ -2797,6 +2831,10 @@ async def on_text(message: types.Message):
             # Отмена — тихо останавливаем цикл фраз и выходим
             cancel_event.set()
             try:
+                DB_REPOSITORIES.update_job_status(job_id, JobStatus.CANCELLED, error_code="cancelled")
+            except (KeyError, ValueError):
+                pass
+            try:
                 status_task.cancel()
             except Exception:
                 pass
@@ -2823,6 +2861,15 @@ async def on_text(message: types.Message):
         except Exception as e:
             logging.exception("Image generation failed (provider=%s user_id=%s): %s", IMAGE_BACKEND_PROVIDER, user_id, e)
             cancel_event.set()
+            try:
+                DB_REPOSITORIES.update_job_status(
+                    job_id,
+                    JobStatus.FAILED,
+                    progress=100,
+                    error_code=type(e).__name__,
+                )
+            except (KeyError, ValueError):
+                pass
             try:
                 status_task.cancel()
             except Exception:
@@ -2858,7 +2905,33 @@ async def on_text(message: types.Message):
         IMAGE_JOBS.pop(user_id, None)
 
         # Отдаём картинку пользователю
-        await message.answer_photo(BufferedInputFile(img_bytes, filename="image.png"))
+        current_job = DB_REPOSITORIES.load_job(job_id)
+        if current_job is None or current_job.status != JobStatus.RUNNING:
+            return
+        try:
+            await message.answer_photo(BufferedInputFile(img_bytes, filename="image.png"))
+        except Exception as e:
+            logging.exception("Image delivery failed (provider=%s user_id=%s): %s", IMAGE_BACKEND_PROVIDER, user_id, e)
+            try:
+                DB_REPOSITORIES.update_job_status(
+                    job_id,
+                    JobStatus.FAILED,
+                    progress=100,
+                    error_code=type(e).__name__,
+                )
+            except (KeyError, ValueError):
+                pass
+            await message.answer("Не получилось отправить картинку. (см. лог ошибок)")
+            return
+        try:
+            DB_REPOSITORIES.update_job_status(
+                job_id,
+                JobStatus.COMPLETED,
+                progress=100,
+                result_ref="telegram:image_sent",
+            )
+        except (KeyError, ValueError):
+            pass
         if mode == "whore":
             record_runtime_explicit_image_usage(user_id)
 
@@ -3329,6 +3402,12 @@ async def cb_imgcancel(callback: types.CallbackQuery):
     # ставим флаг отмены
     cancel_event: asyncio.Event = job["cancel_event"]
     cancel_event.set()
+    job_id = job.get("job_id")
+    if job_id:
+        try:
+            DB_REPOSITORIES.update_job_status(str(job_id), JobStatus.CANCELLED, error_code="cancelled")
+        except (KeyError, ValueError):
+            pass
 
     status_task: asyncio.Task | None = job.get("status_task")
     if status_task and not status_task.done():
@@ -3352,6 +3431,7 @@ async def cb_imgcancel(callback: types.CallbackQuery):
 async def main():
     logging.info("DB_PATH=%s", DB_PATH)
     init_db()
+    reconcile_runtime_jobs()
     readiness = ReadinessState()
     http_app = create_app(
         AppDependencies(

@@ -21,7 +21,8 @@
 - `ALPHA-003 Postgres Backend + Cutover Runbook` is merged to `main`.
 - `ALPHA-004 Provider Matrix + Explicit Policy Layer` is merged to `main`.
 - `ALPHA-005 Monetization Core + Admin Commands` is merged to `main`.
-- `ALPHA-006 Persona Audit + Launch Allowlist Freeze` is implemented on `codex/alpha-006-persona-audit` and ready for review/merge.
+- `ALPHA-006 Persona Audit + Launch Allowlist Freeze` is merged to `main`.
+- `ALPHA-007 Job Reliability` is implemented on `codex/alpha-007-job-reliability` and ready for review/merge.
 - Post-alpha standalone Web direction is captured as an accepted identity/readiness decision: `docs/adr/0002-user-identity-and-standalone-web-readiness.md`.
 
 ## Completed
@@ -98,10 +99,21 @@
   - `whore` and `unhinged` treated as gated explicit personas
   - bot mode menu and HTTP `/api/characters` now use the frozen alpha catalog instead of raw `modes.py`
   - full local verification passed: `python -m pytest -q`, `python -m ruff check .`, and `python -m mypy`
+- `ALPHA-006 Persona Audit + Launch Allowlist Freeze` is merged to `main`
+- `ALPHA-007` has started with:
+  - `ALPHA-006` marked `Done` and `ALPHA-007` marked `In Progress`
+  - scope confirmed from `prs/alpha-007-job-reliability/brief.md`
+- `ALPHA-007` now adds:
+  - UUID4 image job ids for non-enumerable status lookups
+  - persisted image job lifecycle state through `DB_REPOSITORIES`
+  - startup stale job reconciliation for queued/running jobs
+  - terminal-state protection for cancelled jobs versus late completion/failure
+  - protected owner/operator access for `GET /api/jobs/{job_id}`
+  - full local verification passed: `python -m pytest -q`, `python -m ruff check .`, and `python -m mypy`
 
 ## Next Step
 
-Review and merge `ALPHA-006 Persona Audit + Launch Allowlist Freeze`, then start `ALPHA-007 Job Reliability`.
+Review and merge `ALPHA-007 Job Reliability`, then start `ALPHA-008 Mini App Alpha`.
 
 ## Risks / Notes
 

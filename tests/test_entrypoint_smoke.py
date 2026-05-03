@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import sqlite3
+import uuid
 from types import SimpleNamespace
 from unittest.mock import AsyncMock
 
@@ -548,6 +549,184 @@ async def test_image_prompt_flow_blocks_saved_persona_outside_alpha_launch_catal
     assert "закрыт" in message.answers[-1]["text"].lower()
     assert 61040 not in module.IMAGE_JOBS
     module.generate_image_backend.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_image_prompt_flow_persists_job_lifecycle(module_loader, monkeypatch):
+    module = module_loader("src.main")
+    module.init_db()
+    monkeypatch.setattr(module, "generate_image_backend", AsyncMock(return_value=b"image"))
+    monkeypatch.setattr(module, "run_image_fun_only_loop", AsyncMock())
+    user_ref, conversation_ref = module._repo_refs(61041)
+    module.DB_REPOSITORIES.set_active_mode(user_ref, conversation_ref, "basic")
+    module.upsert_photo_gate(
+        61041,
+        score=1,
+        attempts=1,
+        last_ask_ts=1,
+        cooldown_until_ts=0,
+        awaiting_image_prompt=1,
+        image_cooldown_until_ts=0,
+    )
+    message = FakeMessage("draw this", user_id=61041)
+
+    await module.on_text(message)
+
+    conn = module.DB_REPOSITORIES._connect()
+    try:
+        row = conn.execute(
+            "SELECT job_id, status, progress, result_ref FROM jobs WHERE user_id=?",
+            (61041,),
+        ).fetchone()
+    finally:
+        conn.close()
+    assert row is not None
+    uuid.UUID(str(row[0]))
+    assert row[1] == module.JobStatus.COMPLETED.value
+    assert row[2] == 100
+    assert row[3] == "telegram:image_sent"
+    assert message.photos
+
+
+def test_reconcile_runtime_jobs_marks_stale_active_jobs(module_loader):
+    module = module_loader("src.main")
+    module.init_db()
+    user_ref, conversation_ref = module._repo_refs(61043)
+    module.DB_REPOSITORIES.create_job(
+        module.DeferredJob(
+            job_id="stale-runtime-job",
+            user_ref=user_ref,
+            conversation_ref=conversation_ref,
+            mode="basic",
+            job_type=module.JobType.IMAGE,
+            status=module.JobStatus.RUNNING,
+            progress=0,
+            created_at=100,
+            updated_at=200,
+        )
+    )
+
+    reconciled = module.reconcile_runtime_jobs(now_ts=200)
+
+    job = module.DB_REPOSITORIES.load_job("stale-runtime-job")
+    assert reconciled == 1
+    assert job is not None
+    assert job.status == module.JobStatus.FAILED
+    assert job.error_code == "stale_on_startup"
+
+
+@pytest.mark.asyncio
+async def test_image_prompt_late_completion_does_not_overwrite_cancelled_job(module_loader, monkeypatch):
+    module = module_loader("src.main")
+    module.init_db()
+    monkeypatch.setattr(module, "run_image_fun_only_loop", AsyncMock())
+    user_ref, conversation_ref = module._repo_refs(61042)
+    module.DB_REPOSITORIES.set_active_mode(user_ref, conversation_ref, "basic")
+    module.upsert_photo_gate(
+        61042,
+        score=1,
+        attempts=1,
+        last_ask_ts=1,
+        cooldown_until_ts=0,
+        awaiting_image_prompt=1,
+        image_cooldown_until_ts=0,
+    )
+
+    async def complete_after_cancel(prompt: str, *, mode: str = "basic") -> bytes:
+        conn = module.DB_REPOSITORIES._connect()
+        try:
+            row = conn.execute("SELECT job_id FROM jobs WHERE user_id=?", (61042,)).fetchone()
+        finally:
+            conn.close()
+        assert row is not None
+        module.DB_REPOSITORIES.update_job_status(str(row[0]), module.JobStatus.CANCELLED, error_code="reset")
+        return b"image"
+
+    monkeypatch.setattr(module, "generate_image_backend", complete_after_cancel)
+    message = FakeMessage("draw this", user_id=61042)
+
+    await module.on_text(message)
+
+    conn = module.DB_REPOSITORIES._connect()
+    try:
+        row = conn.execute("SELECT status, error_code FROM jobs WHERE user_id=?", (61042,)).fetchone()
+    finally:
+        conn.close()
+    assert row is not None
+    assert row[0] == module.JobStatus.CANCELLED.value
+    assert row[1] == "reset"
+
+
+@pytest.mark.asyncio
+async def test_image_prompt_late_completion_does_not_send_cancelled_job(module_loader, monkeypatch):
+    module = module_loader("src.main")
+    module.init_db()
+    monkeypatch.setattr(module, "run_image_fun_only_loop", AsyncMock())
+    user_ref, conversation_ref = module._repo_refs(61044)
+    module.DB_REPOSITORIES.set_active_mode(user_ref, conversation_ref, "basic")
+    module.upsert_photo_gate(
+        61044,
+        score=1,
+        attempts=1,
+        last_ask_ts=1,
+        cooldown_until_ts=0,
+        awaiting_image_prompt=1,
+        image_cooldown_until_ts=0,
+    )
+
+    async def complete_after_cancel(prompt: str, *, mode: str = "basic") -> bytes:
+        conn = module.DB_REPOSITORIES._connect()
+        try:
+            row = conn.execute("SELECT job_id FROM jobs WHERE user_id=?", (61044,)).fetchone()
+        finally:
+            conn.close()
+        assert row is not None
+        module.DB_REPOSITORIES.update_job_status(str(row[0]), module.JobStatus.CANCELLED, error_code="reset")
+        return b"image"
+
+    monkeypatch.setattr(module, "generate_image_backend", complete_after_cancel)
+    message = FakeMessage("draw this", user_id=61044)
+
+    await module.on_text(message)
+
+    assert message.photos == []
+
+
+@pytest.mark.asyncio
+async def test_image_prompt_send_failure_marks_job_failed(module_loader, monkeypatch):
+    module = module_loader("src.main")
+    module.init_db()
+    monkeypatch.setattr(module, "generate_image_backend", AsyncMock(return_value=b"image"))
+    monkeypatch.setattr(module, "run_image_fun_only_loop", AsyncMock())
+    user_ref, conversation_ref = module._repo_refs(61045)
+    module.DB_REPOSITORIES.set_active_mode(user_ref, conversation_ref, "basic")
+    module.upsert_photo_gate(
+        61045,
+        score=1,
+        attempts=1,
+        last_ask_ts=1,
+        cooldown_until_ts=0,
+        awaiting_image_prompt=1,
+        image_cooldown_until_ts=0,
+    )
+    message = FakeMessage("draw this", user_id=61045)
+
+    async def fail_photo(*args, **kwargs):
+        raise RuntimeError("telegram send failed")
+
+    monkeypatch.setattr(message, "answer_photo", fail_photo)
+
+    await module.on_text(message)
+
+    conn = module.DB_REPOSITORIES._connect()
+    try:
+        row = conn.execute("SELECT status, progress, error_code FROM jobs WHERE user_id=?", (61045,)).fetchone()
+    finally:
+        conn.close()
+    assert row is not None
+    assert row[0] == module.JobStatus.FAILED.value
+    assert row[1] == 100
+    assert row[2] == "RuntimeError"
 
 
 @pytest.mark.asyncio

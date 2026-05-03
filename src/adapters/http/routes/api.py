@@ -79,7 +79,12 @@ def job_detail(job_id: str, request: Request) -> dict[str, str | int | None]:
     session = require_session(request)
     dependencies = request.app.state.dependencies
     job = dependencies.repositories.load_job(job_id)
-    if job is None or job.user_ref != session.user_ref:
+    is_operator = False
+    try:
+        is_operator = int(session.user_ref.value) in dependencies.settings.operator_telegram_ids
+    except ValueError:
+        is_operator = False
+    if job is None or (job.user_ref != session.user_ref and not is_operator):
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="job_not_found")
     return {
         "job_id": job.job_id,
