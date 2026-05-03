@@ -94,6 +94,7 @@ class Settings:
     http_port: int
     http_cors_origins: tuple[str, ...]
     http_session_ttl_sec: int
+    http_session_refresh_ttl_sec: int
     http_telegram_init_max_age_sec: int
     http_session_rate_limit_window_sec: int
     http_session_rate_limit_max_attempts: int
@@ -174,6 +175,7 @@ class Settings:
             http_port=_get_int(source, "HTTP_PORT", _get_int(source, "PORT", 8000)),
             http_cors_origins=_get_csv_tuple(source, "HTTP_CORS_ORIGINS"),
             http_session_ttl_sec=_get_int(source, "HTTP_SESSION_TTL_SEC", 3600),
+            http_session_refresh_ttl_sec=_get_int(source, "HTTP_SESSION_REFRESH_TTL_SEC", 604_800),
             http_telegram_init_max_age_sec=_get_int(source, "HTTP_TELEGRAM_INIT_MAX_AGE_SEC", 90),
             http_session_rate_limit_window_sec=_get_int(source, "HTTP_SESSION_RATE_LIMIT_WINDOW_SEC", 60),
             http_session_rate_limit_max_attempts=_get_int(source, "HTTP_SESSION_RATE_LIMIT_MAX_ATTEMPTS", 5),

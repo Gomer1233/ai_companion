@@ -8,9 +8,30 @@ const state: MiniAppState = {
   me: { user_id: "42", session_expires_at: 999 },
   characters: {
     items: [
-      { id: "basic", mode: "basic", title: "AI Assistant", category: "assistant", default_tier: "free" },
-      { id: "coach", mode: "coach_premium", title: "Coach", category: "practice", default_tier: "premium" },
-      { id: "whore", mode: "whore", title: "Flirt 18+", category: "explicit", default_tier: "premium" },
+      {
+        id: "basic",
+        mode: "basic",
+        title: "AI Assistant",
+        category: "assistant",
+        default_tier: "free",
+        access: { allowed: true, reasons: [] },
+      },
+      {
+        id: "coach",
+        mode: "coach_premium",
+        title: "Coach",
+        category: "practice",
+        default_tier: "premium",
+        access: { allowed: false, reasons: ["premium_required"] },
+      },
+      {
+        id: "whore",
+        mode: "whore",
+        title: "Flirt 18+",
+        category: "explicit",
+        default_tier: "premium",
+        access: { allowed: false, reasons: ["explicit_consent_required"] },
+      },
     ],
   },
   entitlements: {
@@ -46,6 +67,28 @@ describe("MiniApp", () => {
     expect(screen.getByText("Cooldown 300 sec")).toBeInTheDocument();
     expect(screen.getByText("User 42")).toBeInTheDocument();
     expect(screen.getByRole("navigation", { name: "Mini App sections" })).toBeInTheDocument();
+    expect(document.getElementById("home")).not.toBeNull();
+    expect(document.getElementById("channels")).not.toBeNull();
+  });
+
+  it("renders explicit trial access from backend access flags", () => {
+    render(
+      <MiniApp
+        state={{
+          ...state,
+          characters: {
+            items: state.characters.items.map((item) =>
+              item.category === "explicit" ? { ...item, access: { allowed: true, reasons: [] } } : item,
+            ),
+          },
+          entitlements: { ...state.entitlements, tier: "trial", explicit_consent: true, consent_required: false },
+        }}
+        onAcceptExplicit={vi.fn()}
+      />,
+    );
+
+    expect(screen.queryByText("18+ LOCKED")).not.toBeInTheDocument();
+    expect(screen.getByText("18+ OPEN")).toBeInTheDocument();
   });
 
   it("uses a backend consent action for restricted 18+ access", () => {

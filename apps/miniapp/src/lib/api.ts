@@ -2,11 +2,15 @@ export type SessionResponse = {
   access_token: string;
   token_type: "Bearer";
   expires_at: number;
+  refresh_token: string;
+  refresh_expires_at: number;
 };
 
 export type SessionToken = {
   accessToken: string;
   expiresAt: number;
+  refreshToken?: string;
+  refreshExpiresAt?: number;
 };
 
 export type TokenStore = {
@@ -21,6 +25,10 @@ export type CharacterItem = {
   title: string;
   category: string;
   default_tier: string;
+  access: {
+    allowed: boolean;
+    reasons: string[];
+  };
 };
 
 export type Entitlements = {
@@ -103,7 +111,7 @@ export async function exchangeTelegramSession(options: ApiOptions): Promise<Sess
     throw new Error(`session_exchange_failed:${response.status}`);
   }
   const data = (await response.json()) as SessionResponse;
-  const token = { accessToken: data.access_token, expiresAt: data.expires_at };
+  const token = sessionTokenFromResponse(data);
   options.tokenStore.set(token);
   return token;
 }
@@ -130,13 +138,39 @@ async function authorizedJson<T>(options: ApiOptions, path: string, init: Reques
   let response = await fetchImpl(joinUrl(options.apiBaseUrl, path), withAuth(init, firstToken.accessToken));
   if (response.status === 401) {
     options.tokenStore.clear();
-    const refreshed = await exchangeTelegramSession(options);
+    if (!firstToken.refreshToken) {
+      throw new Error("session_refresh_unavailable");
+    }
+    const refreshed = await refreshSession(options, firstToken.refreshToken);
     response = await fetchImpl(joinUrl(options.apiBaseUrl, path), withAuth(init, refreshed.accessToken));
   }
   if (!response.ok) {
     throw new Error(`api_request_failed:${path}:${response.status}`);
   }
   return (await response.json()) as T;
+}
+
+async function refreshSession(options: ApiOptions, refreshToken: string): Promise<SessionToken> {
+  const response = await (options.fetchImpl ?? fetch)(joinUrl(options.apiBaseUrl, "/api/session/refresh"), {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ refresh_token: refreshToken }),
+  });
+  if (!response.ok) {
+    throw new Error(`session_refresh_failed:${response.status}`);
+  }
+  const token = sessionTokenFromResponse((await response.json()) as SessionResponse);
+  options.tokenStore.set(token);
+  return token;
+}
+
+function sessionTokenFromResponse(data: SessionResponse): SessionToken {
+  return {
+    accessToken: data.access_token,
+    expiresAt: data.expires_at,
+    refreshToken: data.refresh_token,
+    refreshExpiresAt: data.refresh_expires_at,
+  };
 }
 
 function withAuth(init: RequestInit, accessToken: string): RequestInit {

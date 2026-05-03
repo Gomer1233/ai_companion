@@ -116,10 +116,35 @@ def test_characters_entitlements_and_usage_are_backend_owned(tmp_path: Path) -> 
     coach = next(item for item in character_items if item["id"] == "coach")
     assert coach["mode"] == "coach_premium"
     assert coach["category"] == "practice"
+    assert coach["access"] == {"allowed": False, "reasons": ["premium_required"]}
     assert entitlements.status_code == 200
     assert "has_premium" in entitlements.json()
     assert usage.status_code == 200
     assert "history_limit" in usage.json()
+
+
+def test_characters_include_backend_owned_explicit_access_for_trial_users(tmp_path: Path) -> None:
+    client, deps = _make_client(tmp_path)
+    token = _issue_token(client, deps.settings.telegram_token, 210)
+    user_ref = UserRef("210")
+    now_ts = int(time.time())
+    deps.repositories.upsert_entitlement(
+        entitlement_id="trial-api",
+        user_ref=user_ref,
+        plan_id="manual_trial",
+        tier=Tier.TRIAL,
+        starts_at=now_ts - 10,
+        expires_at=now_ts + 86_400,
+        source="manual:operator:trial",
+        created_at=now_ts - 10,
+    )
+    deps.repositories.set_explicit_consent(user_ref, accepted_at=now_ts - 5, source="telegram")
+
+    response = client.get("/api/characters", headers={"Authorization": f"Bearer {token}"})
+
+    assert response.status_code == 200
+    explicit = next(item for item in response.json()["items"] if item["category"] == "explicit")
+    assert explicit["access"] == {"allowed": True, "reasons": []}
 
 
 def test_entitlements_and_usage_return_real_monetization_state(tmp_path: Path) -> None:

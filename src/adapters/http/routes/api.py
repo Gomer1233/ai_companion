@@ -22,8 +22,11 @@ def me(request: Request) -> dict[str, str | int]:
 
 
 @router.get("/characters")
-def characters(request: Request) -> dict[str, list[dict[str, str]]]:
-    require_session(request)
+def characters(request: Request) -> dict[str, list[dict[str, object]]]:
+    session = require_session(request)
+    dependencies = request.app.state.dependencies
+    service = MonetizationService(dependencies.repositories)
+    now_ts = int(time.time())
     return {
         "items": [
             {
@@ -32,6 +35,10 @@ def characters(request: Request) -> dict[str, list[dict[str, str]]]:
                 "title": item.title,
                 "category": item.category,
                 "default_tier": item.default_tier,
+                "access": {
+                    "allowed": (decision := service.can_use_persona(session.user_ref, item.mode, now_ts)).allowed,
+                    "reasons": list(decision.reasons),
+                },
             }
             for item in build_alpha_launch_catalog()
         ],

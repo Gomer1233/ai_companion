@@ -14,7 +14,7 @@ export function MiniApp({ state, onAcceptExplicit }: Props) {
   const passLabel = state.entitlements.has_premium ? "VIP PASS" : "FREE PASS";
 
   return (
-    <main className="shell" data-testid="mini-app-shell">
+    <main className="shell" id="home" data-testid="mini-app-shell">
       <header className="osd">
         <div>
           <p className="osd-kicker">LIVE / MINI APP</p>
@@ -54,7 +54,7 @@ export function MiniApp({ state, onAcceptExplicit }: Props) {
         </button>
       </section>
 
-      <section className="guide" aria-label="Channels">
+      <section className="guide" id="channels" aria-label="Channels">
         {state.characters.items.map((item, index) => (
           <article className={`channel-row ${item.category === "explicit" ? "restricted" : ""}`} key={item.id}>
             <div className="channel-number">CH {String(index + 1).padStart(3, "0")}</div>
@@ -64,10 +64,12 @@ export function MiniApp({ state, onAcceptExplicit }: Props) {
             </div>
             <div className="badges">
               {item.default_tier === "premium" ? <span className="badge vip">VIP</span> : <span className="badge">FREE</span>}
-              {item.default_tier === "premium" && !state.entitlements.has_premium ? (
+              {!item.access.allowed ? (
                 <span className="badge">LOCKED</span>
               ) : null}
-              {item.category === "explicit" ? <span className="badge danger">18+ LOCKED</span> : null}
+              {item.category === "explicit" ? (
+                <span className="badge danger">{item.access.allowed ? "18+ OPEN" : "18+ LOCKED"}</span>
+              ) : null}
             </div>
           </article>
         ))}

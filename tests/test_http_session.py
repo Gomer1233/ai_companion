@@ -73,10 +73,34 @@ def test_session_exchange_issues_opaque_token(tmp_path: Path) -> None:
 
     assert response.status_code == 200
     payload = response.json()
-    assert set(payload) == {"access_token", "token_type", "expires_at"}
+    assert set(payload) == {"access_token", "token_type", "expires_at", "refresh_token", "refresh_expires_at"}
     assert payload["token_type"] == "Bearer"
     assert isinstance(payload["access_token"], str)
     assert len(payload["access_token"]) >= 16
+    assert isinstance(payload["refresh_token"], str)
+    assert payload["refresh_expires_at"] > payload["expires_at"]
+    assert deps.repositories.load_session(payload["access_token"]) is not None
+
+
+def test_session_refresh_issues_new_access_token_without_telegram_init_data(tmp_path: Path) -> None:
+    client, deps = _make_client(tmp_path, HTTP_SESSION_TTL_SEC="30", HTTP_TELEGRAM_INIT_MAX_AGE_SEC="1")
+    exchanged = client.post(
+        "/api/session/telegram",
+        json={"init_data": _telegram_init_data(telegram_token=deps.settings.telegram_token, user_id=101)},
+    )
+    assert exchanged.status_code == 200
+    old_access_token = exchanged.json()["access_token"]
+    refresh_token = exchanged.json()["refresh_token"]
+    deps.repositories.delete_session(old_access_token)
+
+    response = client.post("/api/session/refresh", json={"refresh_token": refresh_token})
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert set(payload) == {"access_token", "token_type", "expires_at", "refresh_token", "refresh_expires_at"}
+    assert payload["token_type"] == "Bearer"
+    assert payload["access_token"] != old_access_token
+    assert payload["refresh_token"] == refresh_token
     assert deps.repositories.load_session(payload["access_token"]) is not None
 
 
