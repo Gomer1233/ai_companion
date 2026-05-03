@@ -12,19 +12,11 @@ function jsonResponse(body: unknown, init: ResponseInit = {}) {
 describe("Mini App API client", () => {
   it("loads backend-owned app state and silently re-auths on 401", async () => {
     const tokenStore = createMemoryTokenStore();
-    tokenStore.set({ accessToken: "old-token", expiresAt: 111, refreshToken: "refresh-token", refreshExpiresAt: 9999 });
+    tokenStore.set({ accessToken: "old-token", expiresAt: 111 });
     const fetchImpl = vi
       .fn<typeof fetch>()
       .mockResolvedValueOnce(jsonResponse({ detail: "invalid_token" }, { status: 401 }))
-      .mockResolvedValueOnce(
-        jsonResponse({
-          access_token: "new-token",
-          token_type: "Bearer",
-          expires_at: 999,
-          refresh_token: "refresh-token",
-          refresh_expires_at: 9999,
-        }),
-      )
+      .mockResolvedValueOnce(jsonResponse({ access_token: "new-token", token_type: "Bearer", expires_at: 999 }))
       .mockResolvedValueOnce(jsonResponse({ user_id: "42", session_expires_at: 999 }))
       .mockResolvedValueOnce(
         jsonResponse({
@@ -73,10 +65,10 @@ describe("Mini App API client", () => {
     );
     expect(fetchImpl).toHaveBeenNthCalledWith(
       2,
-      "https://railway.example/api/session/refresh",
+      "https://railway.example/api/session/telegram",
       expect.objectContaining({
         method: "POST",
-        body: JSON.stringify({ refresh_token: "refresh-token" }),
+        body: JSON.stringify({ init_data: "tg-init-data" }),
       }),
     );
     expect(fetchImpl).toHaveBeenNthCalledWith(
@@ -84,12 +76,7 @@ describe("Mini App API client", () => {
       "https://railway.example/api/me",
       expect.objectContaining({ headers: { Authorization: "Bearer new-token" } }),
     );
-    expect(tokenStore.get()).toEqual({
-      accessToken: "new-token",
-      expiresAt: 999,
-      refreshToken: "refresh-token",
-      refreshExpiresAt: 9999,
-    });
+    expect(tokenStore.get()).toEqual({ accessToken: "new-token", expiresAt: 999 });
     expect(state.me.user_id).toBe("42");
     expect(state.characters.items[0].mode).toBe("coach_premium");
     expect(state.entitlements.consent_required).toBe(true);
@@ -127,21 +114,4 @@ describe("Mini App API client", () => {
     expect(result.explicit_consent).toBe(true);
   });
 
-  it("fails on 401 without reusing stale init data when no refresh token is stored", async () => {
-    const tokenStore = createMemoryTokenStore();
-    tokenStore.set({ accessToken: "old-token", expiresAt: 111 });
-    const fetchImpl = vi.fn<typeof fetch>().mockResolvedValueOnce(jsonResponse({ detail: "invalid_token" }, { status: 401 }));
-
-    await expect(
-      loadMiniAppState({
-        apiBaseUrl: "https://railway.example",
-        initData: "tg-init-data",
-        tokenStore,
-        fetchImpl,
-      }),
-    ).rejects.toThrow("session_refresh_unavailable");
-
-    expect(fetchImpl).toHaveBeenCalledTimes(1);
-    expect(tokenStore.get()).toBeNull();
-  });
 });

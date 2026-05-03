@@ -39,8 +39,8 @@ export default function Page() {
 
   async function handleAcceptExplicit() {
     const initData = window.Telegram?.WebApp?.initData ?? "";
-    const entitlements = await acceptExplicitConsent({ apiBaseUrl, initData, tokenStore });
-    setState((current) => (current ? { ...current, entitlements } : current));
+    await acceptExplicitConsent({ apiBaseUrl, initData, tokenStore });
+    setState(await loadMiniAppState({ apiBaseUrl, initData, tokenStore }));
   }
 
   if (error) {
