@@ -25,9 +25,9 @@ from src.config.modes import (
     MODE_TO_TEMPERATURE,
     MODE_TO_MAX_TOKENS,
     MODE_TO_FREQUENCY_PENALTY,
-    MODE_CATALOG,
     MODE_TO_PREMISE,
 )
+from src.config.persona_audit import build_alpha_launch_catalog
 import httpx
 from aiogram import Bot, Dispatcher, types, F
 from aiogram.filters import Command
@@ -2223,12 +2223,17 @@ def build_modes_keyboard(user_id: int, current_mode: str | None = None) -> Inlin
     current = (current_mode or "").strip()
     stats = get_active_dialog_stats(user_id)
 
-    for title, mode in MODE_CATALOG:
-        marker = " ✓" if mode == current else ""
-        prefix = "↩️ " if stats.get(mode, 0) else "🆕 "
-        rows.append([InlineKeyboardButton(text=f"{prefix}{title}{marker}", callback_data=f"setmode:{mode}")])
+    for item in build_alpha_launch_catalog():
+        marker = " ✓" if item.mode == current else ""
+        prefix = "↩️ " if stats.get(item.mode, 0) else "🆕 "
+        rows.append([InlineKeyboardButton(text=f"{prefix}{item.title}{marker}", callback_data=f"setmode:{item.mode}")])
 
     return InlineKeyboardMarkup(inline_keyboard=rows)
+
+
+def is_alpha_launch_mode_enabled(mode: str) -> bool:
+    normalized = mode.strip()
+    return normalized in {item.mode for item in build_alpha_launch_catalog()}
 
 
 @dp.message(Command("mode"))
@@ -2317,7 +2322,7 @@ async def cb_setmode(callback: types.CallbackQuery):
 
     mode = callback.data.split(":", 1)[1].strip()
 
-    if mode not in MODE_TO_SYSTEM_PROMPT:
+    if mode not in MODE_TO_SYSTEM_PROMPT or not is_alpha_launch_mode_enabled(mode):
         await callback.answer("Неизвестный режим", show_alert=True)
         return
 
@@ -2724,6 +2729,12 @@ async def on_text(message: types.Message):
 
     # --- IMAGE GENERATION FLOW (awaiting prompt) ---
     if int(photo_gate.get("awaiting_image_prompt") or 0) == 1:
+        profile = get_user_profile(user_id)
+        mode = (profile.get("mode") or "basic").strip()
+        if not is_alpha_launch_mode_enabled(mode):
+            await message.answer("Доступ к этому персонажу сейчас закрыт.")
+            return
+
         cd_until = int(photo_gate.get("image_cooldown_until_ts") or 0)
         if cd_until > now:
             left = cd_until - now
@@ -2753,9 +2764,7 @@ async def on_text(message: types.Message):
         IMAGE_JOBS[user_id]["status_task"] = status_task
 
         # 2) Запускаем генерацию
-        profile = get_user_profile(user_id)
-        mode = (profile.get("mode") or "basic").strip()
-        image_decision = authorize_runtime_explicit_image(user_id) if mode == "whore" else AccessDecision(True)
+        image_decision = authorize_runtime_explicit_image(user_id) if ACCESS_POLICY.is_explicit_mode(mode) else AccessDecision(True)
         if not image_decision.allowed:
             await message.answer("Лимит или доступ к explicit-картинкам сейчас недоступен.")
             return
@@ -2891,6 +2900,9 @@ async def on_text(message: types.Message):
    
     profile = get_user_profile(user_id)
     mode = (profile.get("mode") or "basic").strip()
+    if not is_alpha_launch_mode_enabled(mode):
+        await message.answer("Доступ к этому персонажу сейчас закрыт.")
+        return
     persona_decision = authorize_runtime_persona(user_id, mode)
     if not persona_decision.allowed:
         await message.answer("Доступ к этому персонажу сейчас закрыт.")

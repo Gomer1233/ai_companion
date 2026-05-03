@@ -611,7 +611,7 @@ class MonetizationService:
 
     @staticmethod
     def _is_explicit_persona(persona: str) -> bool:
-        return persona == "whore"
+        return persona in {"whore", "unhinged"}
 
     def _lifetime_entitlement_count(self) -> int:
         entitlements = getattr(self.repositories, "load_manual_lifetime_entitlement_count", None)

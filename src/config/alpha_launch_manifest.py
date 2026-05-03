@@ -18,6 +18,13 @@ ALPHA_LAUNCH_MODEL_MANIFEST: tuple[LaunchManifestRecord, ...] = (
         capabilities=(ExplicitCapability.IMAGE,),
         enabled=True,
     ),
+    LaunchManifestRecord(
+        persona="unhinged",
+        provider="openrouter",
+        model="x-ai/grok-4.1-fast",
+        capabilities=(ExplicitCapability.TEXT,),
+        enabled=True,
+    ),
 )
 
 

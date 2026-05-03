@@ -43,6 +43,15 @@ PR documentation rules:
 - `prs/<pr-id>/brief.md` defines the scope of one PR.
 - `prs/<pr-id>/tasks.md` is only an execution checklist, not a source of architectural truth.
 
+PR status reconciliation:
+
+- Before starting a new PR in an initiative, reconcile `docs/current/<initiative>/pr-backlog.md` and `docs/current/<initiative>/status.md` against the actual merged state on `main`.
+- If the previous dependency PR has been merged, mark it `Done` and update `status.md` before or as the first change in the next PR branch.
+- When starting the current PR, mark it `In Progress`.
+- When implementation is ready for review, mark it `Ready`.
+- Do not mark a PR `Done` inside its own feature branch before it is actually merged to `main`.
+- If a PR is merged outside the agent workflow, the next agent task must repair stale initiative status docs before implementation work.
+
 Git worktrees:
 
 - Do not create a new worktree for every task by default.
