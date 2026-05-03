@@ -121,6 +121,36 @@ def test_premium_user_without_consent_cannot_access_explicit_persona(tmp_path) -
     assert decision.reasons == ("explicit_consent_required",)
 
 
+def test_unhinged_uses_explicit_persona_gates(tmp_path) -> None:
+    repo, service = _make_service(tmp_path)
+    user_ref = UserRef("61050")
+
+    free_decision = service.can_use_persona(user_ref, "unhinged", now_ts=10_000)
+
+    assert not free_decision.allowed
+    assert free_decision.reasons == ("explicit_tier_required",)
+
+    repo.upsert_entitlement(
+        entitlement_id="trial-unhinged",
+        user_ref=user_ref,
+        plan_id="manual_trial",
+        tier=Tier.TRIAL,
+        starts_at=10_000,
+        expires_at=20_000,
+        source="manual:operator:trial",
+        created_at=10_000,
+    )
+    missing_consent = service.can_use_persona(user_ref, "unhinged", now_ts=10_100)
+
+    assert not missing_consent.allowed
+    assert missing_consent.reasons == ("explicit_consent_required",)
+
+    repo.set_explicit_consent(user_ref, accepted_at=10_200, source="telegram")
+    allowed = service.can_use_persona(user_ref, "unhinged", now_ts=10_300)
+
+    assert allowed.allowed
+
+
 def test_custom_trial_grant_overrides_default_limits_for_one_user(tmp_path) -> None:
     repo, service = _make_service(tmp_path)
     user_ref = UserRef("61005")

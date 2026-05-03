@@ -21,7 +21,7 @@ class ExplicitModerationCategory(str, Enum):
     EXPLOITATION = "exploitation"
 
 
-EXPLICIT_ALPHA_MODES = frozenset({"whore"})
+EXPLICIT_ALPHA_MODES = frozenset({"whore", "unhinged"})
 
 
 class ExplicitSettings(Protocol):

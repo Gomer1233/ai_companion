@@ -107,7 +107,15 @@ def test_characters_entitlements_and_usage_are_backend_owned(tmp_path: Path) -> 
     usage = client.get("/api/usage", headers=headers)
 
     assert characters.status_code == 200
-    assert len(characters.json()["items"]) > 0
+    character_items = characters.json()["items"]
+    assert len(character_items) > 0
+    character_ids = {item["id"] for item in character_items}
+    assert "coach" in character_ids
+    assert "coach_premium" not in character_ids
+    assert "alco" not in character_ids
+    coach = next(item for item in character_items if item["id"] == "coach")
+    assert coach["mode"] == "coach_premium"
+    assert coach["category"] == "practice"
     assert entitlements.status_code == 200
     assert "has_premium" in entitlements.json()
     assert usage.status_code == 200

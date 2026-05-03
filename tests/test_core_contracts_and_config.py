@@ -65,6 +65,14 @@ def test_access_policy_rejects_openai_provider_for_explicit_text_and_image() -> 
     ).allowed is True
     assert service.authorize_explicit(
         ExplicitPolicyInput(
+            mode="unhinged",
+            capability=ExplicitCapability.TEXT,
+            provider="openrouter",
+            model="x-ai/grok-4.1-fast",
+        )
+    ).allowed is True
+    assert service.authorize_explicit(
+        ExplicitPolicyInput(
             mode="whore",
             capability=ExplicitCapability.IMAGE,
             provider="modelslab",
@@ -88,11 +96,21 @@ def test_access_policy_rejects_openai_provider_for_explicit_text_and_image() -> 
             model="gpt-image-1",
         )
     )
+    unhinged_decision = service.authorize_explicit(
+        ExplicitPolicyInput(
+            mode="unhinged",
+            capability=ExplicitCapability.TEXT,
+            provider="openai",
+            model="gpt-4o-mini",
+        )
+    )
 
     assert text_decision.allowed is False
     assert image_decision.allowed is False
+    assert unhinged_decision.allowed is False
     assert "provider_not_allowed" in text_decision.reasons
     assert "provider_not_allowed" in image_decision.reasons
+    assert "provider_not_allowed" in unhinged_decision.reasons
 
 
 def test_access_policy_rejects_openai_model_ids_even_when_provider_is_openrouter() -> None:
@@ -175,7 +193,58 @@ def test_alpha_launch_manifest_is_independent_frozen_config() -> None:
     assert records
     assert all(record.persona for record in records)
     assert all(record.model for record in records)
-    assert {record.persona for record in records} == {"whore"}
+    assert {record.persona for record in records} == {"whore", "unhinged"}
+
+
+def test_persona_audit_covers_every_candidate_persona() -> None:
+    from src.config.modes import PERSONAS
+    from src.config.persona_audit import PERSONA_AUDIT_RECORDS
+
+    candidate_keys = {persona.key for persona in PERSONAS}
+    audited_keys = {record.persona for record in PERSONA_AUDIT_RECORDS}
+
+    assert audited_keys == candidate_keys
+
+
+def test_alpha_launch_catalog_uses_approved_personas_and_categories() -> None:
+    from src.config.persona_audit import build_alpha_launch_catalog
+
+    catalog = build_alpha_launch_catalog(env={})
+    catalog_ids = [item.id for item in catalog]
+    catalog_modes = [item.mode for item in catalog]
+    categories = {item.id: item.category for item in catalog}
+
+    assert catalog_ids == [
+        "basic",
+        "brainstorm",
+        "psychologist",
+        "coach",
+        "oldschool_rep",
+        "chef",
+        "financial",
+        "doctor",
+        "pet_behaviorist",
+        "oldtimer",
+        "whore",
+        "unhinged",
+    ]
+    assert "coach" in catalog_ids
+    assert "coach_premium" not in catalog_ids
+    assert "coach_premium" in catalog_modes
+    assert "coach" not in catalog_modes
+    assert categories["coach"] == "practice"
+    assert categories["oldtimer"] == "entertainment"
+    assert categories["whore"] == "explicit"
+    assert categories["unhinged"] == "explicit"
+    assert {"alco", "communist", "conspiro"} & set(catalog_ids) == set()
+
+
+def test_alpha_launch_catalog_respects_persona_kill_switches() -> None:
+    from src.config.persona_audit import build_alpha_launch_catalog
+
+    catalog = build_alpha_launch_catalog(env={"LINA_PERSONA_UNHINGED_ENABLED": "0"})
+
+    assert "unhinged" not in {item.id for item in catalog}
 
 
 def test_alpha_launch_manifest_rejects_openai_model_ids() -> None:

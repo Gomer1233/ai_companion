@@ -442,6 +442,114 @@ def test_runtime_monetization_helpers_gate_personas_and_record_usage(module_load
     assert snapshot.usage.messages_used == 1
 
 
+def test_mode_keyboard_uses_alpha_launch_catalog(module_loader):
+    module = module_loader("src.main")
+    module.init_db()
+
+    keyboard = module.build_modes_keyboard(61036, current_mode="coach_premium")
+    buttons = [row[0] for row in keyboard.inline_keyboard]
+    callback_data = [button.callback_data for button in buttons]
+    texts = [button.text for button in buttons]
+
+    assert "setmode:coach_premium" in callback_data
+    assert "setmode:coach" not in callback_data
+    assert all("coach_premium" not in text for text in texts)
+    assert not any("alco" in data for data in callback_data)
+    assert not any("communist" in data for data in callback_data)
+    assert not any("conspiro" in data for data in callback_data)
+
+
+@pytest.mark.asyncio
+async def test_setmode_rejects_persona_outside_alpha_launch_catalog(module_loader):
+    from tests.support import FakeCallbackQuery
+
+    module = module_loader("src.main")
+    module.init_db()
+    callback = FakeCallbackQuery("setmode:alco", user_id=61037)
+
+    await module.cb_setmode(callback)
+
+    assert callback.answers
+    assert callback.answers[-1]["show_alert"] is True
+    assert module.get_user_profile(61037).get("mode") != "alco"
+
+
+@pytest.mark.asyncio
+async def test_text_handler_blocks_saved_persona_outside_alpha_launch_catalog(module_loader, monkeypatch):
+    module = module_loader("src.main")
+    module.init_db()
+    monkeypatch.setattr(module, "call_openrouter_with_meta", AsyncMock(return_value=("reply", "stop", {})))
+    user_ref, conversation_ref = module._repo_refs(61038)
+    module.DB_REPOSITORIES.set_active_mode(
+        user_ref,
+        conversation_ref,
+        "alco",
+    )
+    message = FakeMessage("hello", user_id=61038)
+
+    await module.on_text(message)
+
+    assert message.answers
+    assert "закрыт" in message.answers[-1]["text"].lower()
+    module.call_openrouter_with_meta.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_kill_switch_blocks_runtime_mode_selection_and_saved_mode(module_loader, monkeypatch):
+    from tests.support import FakeCallbackQuery
+
+    module = module_loader("src.main", env={"LINA_PERSONA_UNHINGED_ENABLED": "0"})
+    module.init_db()
+    callback = FakeCallbackQuery("setmode:unhinged", user_id=61039)
+
+    await module.cb_setmode(callback)
+
+    assert callback.answers[-1]["show_alert"] is True
+    assert module.get_user_profile(61039).get("mode") != "unhinged"
+
+    monkeypatch.setattr(module, "call_openrouter_with_meta", AsyncMock(return_value=("reply", "stop", {})))
+    user_ref, conversation_ref = module._repo_refs(61039)
+    module.DB_REPOSITORIES.set_active_mode(
+        user_ref,
+        conversation_ref,
+        "unhinged",
+    )
+    message = FakeMessage("hello", user_id=61039)
+
+    await module.on_text(message)
+
+    assert message.answers
+    assert "закрыт" in message.answers[-1]["text"].lower()
+    module.call_openrouter_with_meta.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_image_prompt_flow_blocks_saved_persona_outside_alpha_launch_catalog(module_loader, monkeypatch):
+    module = module_loader("src.main")
+    module.init_db()
+    monkeypatch.setattr(module, "generate_image_backend", AsyncMock(return_value=b"image"))
+    monkeypatch.setattr(module, "run_image_fun_only_loop", AsyncMock())
+    user_ref, conversation_ref = module._repo_refs(61040)
+    module.DB_REPOSITORIES.set_active_mode(user_ref, conversation_ref, "alco")
+    module.upsert_photo_gate(
+        61040,
+        score=1,
+        attempts=1,
+        last_ask_ts=1,
+        cooldown_until_ts=0,
+        awaiting_image_prompt=1,
+        image_cooldown_until_ts=0,
+    )
+    message = FakeMessage("draw this", user_id=61040)
+
+    await module.on_text(message)
+
+    assert message.answers
+    assert "закрыт" in message.answers[-1]["text"].lower()
+    assert 61040 not in module.IMAGE_JOBS
+    module.generate_image_backend.assert_not_awaited()
+
+
 @pytest.mark.asyncio
 async def test_text_handler_rejects_when_daily_message_limit_is_reached(module_loader, monkeypatch):
     module = module_loader("src.main")

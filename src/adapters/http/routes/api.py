@@ -5,7 +5,7 @@ import time
 from fastapi import APIRouter, HTTPException, Request, status
 
 from src.adapters.http.dependencies import require_session
-from src.config.modes import MODE_CATALOG
+from src.config.persona_audit import build_alpha_launch_catalog
 from src.core.monetization import MonetizationService, Tier
 
 
@@ -25,7 +25,16 @@ def me(request: Request) -> dict[str, str | int]:
 def characters(request: Request) -> dict[str, list[dict[str, str]]]:
     require_session(request)
     return {
-        "items": [{"id": mode, "title": title} for title, mode in MODE_CATALOG],
+        "items": [
+            {
+                "id": item.id,
+                "mode": item.mode,
+                "title": item.title,
+                "category": item.category,
+                "default_tier": item.default_tier,
+            }
+            for item in build_alpha_launch_catalog()
+        ],
     }
 
 

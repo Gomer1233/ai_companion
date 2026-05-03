@@ -20,7 +20,8 @@
 - `ALPHA-002 FastAPI HTTP Adapter` is merged to `main`.
 - `ALPHA-003 Postgres Backend + Cutover Runbook` is merged to `main`.
 - `ALPHA-004 Provider Matrix + Explicit Policy Layer` is merged to `main`.
-- `ALPHA-005 Monetization Core + Admin Commands` is implemented on `codex/alpha-005-monetization-admin` and ready for review/merge.
+- `ALPHA-005 Monetization Core + Admin Commands` is merged to `main`.
+- `ALPHA-006 Persona Audit + Launch Allowlist Freeze` is implemented on `codex/alpha-006-persona-audit` and ready for review/merge.
 - Post-alpha standalone Web direction is captured as an accepted identity/readiness decision: `docs/adr/0002-user-identity-and-standalone-web-readiness.md`.
 
 ## Completed
@@ -88,10 +89,19 @@
   - transactional paid-order fulfillment, paid-but-unfulfilled visibility, repair, refund/cancel states, and durable entitlement revocation
   - protected operator commands for grant, revoke, fulfill repair, user/usage status, and `/admin_users`
   - cutover coverage for payment orders, explicit consent, audit events, order-entitlement links, and revoke fields
+- `ALPHA-006` has started with:
+  - PR status reconciliation rules in `AGENTS.md`
+  - `ALPHA-005` marked `Done` and `ALPHA-006` marked `In Progress`
+  - frozen persona audit records for every current `src/config/modes.py` persona
+  - category-based alpha catalog grouping for assistant, practice, life, wellbeing, entertainment, and explicit personas
+  - `coach_premium` exposed as the single alpha `coach` catalog item while legacy `coach` is superseded
+  - `whore` and `unhinged` treated as gated explicit personas
+  - bot mode menu and HTTP `/api/characters` now use the frozen alpha catalog instead of raw `modes.py`
+  - full local verification passed: `python -m pytest -q`, `python -m ruff check .`, and `python -m mypy`
 
 ## Next Step
 
-Review and merge `ALPHA-005 Monetization Core + Admin Commands`, then start `ALPHA-006 Persona Audit + Launch Allowlist Freeze`.
+Review and merge `ALPHA-006 Persona Audit + Launch Allowlist Freeze`, then start `ALPHA-007 Job Reliability`.
 
 ## Risks / Notes
 
