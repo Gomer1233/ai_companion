@@ -1,0 +1,274 @@
+:root {
+  --tv-black: #090b0e;
+  --receiver: #111b28;
+  --panel: #182535;
+  --panel-hi: #22344a;
+  --paper: #f2ead8;
+  --muted: #9eaebf;
+  --amber: #f0b84a;
+  --teal: #58b9bd;
+  --danger: #c83d3d;
+  --line: rgba(242, 234, 216, 0.16);
+}
+
+* {
+  box-sizing: border-box;
+}
+
+html,
+body {
+  min-height: 100%;
+  margin: 0;
+  background: var(--tv-black);
+  color: var(--paper);
+}
+
+body {
+  font-family: "Trebuchet MS", "Segoe UI", sans-serif;
+}
+
+button,
+a {
+  font: inherit;
+}
+
+.shell {
+  min-height: 100dvh;
+  padding: 14px 12px 82px;
+  background:
+    linear-gradient(rgba(255, 255, 255, 0.035) 1px, transparent 1px),
+    radial-gradient(circle at 30% 0%, rgba(88, 185, 189, 0.12), transparent 34%),
+    linear-gradient(180deg, #0b1119 0%, var(--tv-black) 100%);
+  background-size: 100% 4px, auto, auto;
+}
+
+.centered {
+  display: grid;
+  place-content: center;
+  gap: 12px;
+  text-align: center;
+}
+
+.osd,
+.access-panel,
+.preview,
+.channel-row,
+.bottom-nav {
+  border: 1px solid var(--line);
+  background: linear-gradient(180deg, rgba(34, 52, 74, 0.94), rgba(17, 27, 40, 0.94));
+  box-shadow: inset 0 1px rgba(255, 255, 255, 0.08), 0 12px 30px rgba(0, 0, 0, 0.28);
+}
+
+.osd {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 12px;
+  border-radius: 8px;
+}
+
+.osd h1 {
+  margin: 0;
+  font-size: 34px;
+  letter-spacing: 0;
+  line-height: 1;
+}
+
+.osd-kicker,
+.label,
+.tracking {
+  margin: 0 0 4px;
+  color: var(--teal);
+  font-size: 11px;
+  font-weight: 700;
+  text-transform: uppercase;
+}
+
+.osd-stack {
+  display: grid;
+  gap: 4px;
+  justify-items: end;
+  color: var(--amber);
+  font-size: 12px;
+  font-weight: 700;
+}
+
+.access-panel {
+  display: grid;
+  grid-template-columns: 1fr 1fr 1fr;
+  gap: 8px;
+  margin-top: 10px;
+  padding: 12px;
+  border-radius: 8px;
+}
+
+.access-panel strong {
+  display: block;
+  font-size: 15px;
+}
+
+.preview {
+  margin-top: 10px;
+  padding: 12px;
+  border-radius: 8px;
+}
+
+.preview-screen {
+  min-height: 132px;
+  padding: 14px;
+  border: 1px solid rgba(240, 184, 74, 0.42);
+  background:
+    linear-gradient(90deg, rgba(240, 184, 74, 0.08), transparent),
+    #0c1219;
+}
+
+.preview h2,
+.channel-row h3 {
+  margin: 0;
+  letter-spacing: 0;
+}
+
+.preview p,
+.channel-row p {
+  margin: 6px 0 0;
+  color: var(--muted);
+  line-height: 1.35;
+}
+
+.primary-command,
+.danger-command {
+  min-height: 44px;
+  border: 0;
+  border-radius: 6px;
+  font-weight: 800;
+}
+
+.primary-command {
+  width: 100%;
+  margin-top: 10px;
+  background: var(--amber);
+  color: #17110a;
+}
+
+.guide {
+  display: grid;
+  gap: 8px;
+  margin-top: 10px;
+}
+
+.channel-row {
+  display: grid;
+  grid-template-columns: 56px minmax(0, 1fr) auto;
+  gap: 10px;
+  align-items: center;
+  padding: 10px;
+  border-radius: 8px;
+}
+
+.channel-number {
+  color: var(--amber);
+  font-size: 12px;
+  font-weight: 900;
+}
+
+.badges {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  gap: 4px;
+}
+
+.badge {
+  border: 1px solid var(--line);
+  padding: 4px 6px;
+  border-radius: 4px;
+  color: var(--paper);
+  font-size: 10px;
+  font-weight: 900;
+}
+
+.vip {
+  border-color: rgba(240, 184, 74, 0.58);
+  color: var(--amber);
+}
+
+.danger,
+.restricted .channel-number {
+  color: #ffb2a8;
+}
+
+.restricted {
+  border-color: rgba(200, 61, 61, 0.52);
+  background:
+    repeating-linear-gradient(135deg, rgba(200, 61, 61, 0.08) 0 8px, transparent 8px 16px),
+    linear-gradient(180deg, rgba(45, 20, 24, 0.96), rgba(19, 25, 35, 0.96));
+}
+
+.consent-row {
+  grid-template-columns: 56px minmax(0, 1fr);
+}
+
+.danger-command {
+  grid-column: 1 / -1;
+  background: var(--danger);
+  color: white;
+}
+
+.bottom-nav {
+  position: fixed;
+  right: 12px;
+  bottom: 10px;
+  left: 12px;
+  display: grid;
+  grid-template-columns: repeat(4, 1fr);
+  gap: 4px;
+  padding: 8px;
+  border-radius: 8px;
+}
+
+.info-grid {
+  display: grid;
+  gap: 8px;
+  margin-top: 10px;
+}
+
+.info-panel {
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  padding: 12px;
+  background: rgba(17, 27, 40, 0.74);
+}
+
+.info-panel h2,
+.info-panel p {
+  margin: 0;
+}
+
+.info-panel h2 {
+  margin-bottom: 8px;
+  font-size: 18px;
+}
+
+.info-panel p + p {
+  margin-top: 4px;
+  color: var(--muted);
+}
+
+.bottom-nav a {
+  min-height: 38px;
+  display: grid;
+  place-items: center;
+  color: var(--paper);
+  text-decoration: none;
+  font-size: 12px;
+  font-weight: 800;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    scroll-behavior: auto !important;
+  }
+}

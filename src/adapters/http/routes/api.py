@@ -53,6 +53,25 @@ def entitlements(request: Request) -> dict[str, object]:
     }
 
 
+@router.post("/consent/explicit")
+def explicit_consent(request: Request, payload: dict[str, bool]) -> dict[str, object]:
+    session = require_session(request)
+    if payload.get("accepted") is not True:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="explicit_consent_required")
+    dependencies = request.app.state.dependencies
+    now_ts = int(time.time())
+    dependencies.repositories.set_explicit_consent(session.user_ref, accepted_at=now_ts, source="mini_app")
+    snapshot = MonetizationService(dependencies.repositories).get_access_snapshot(session.user_ref, now_ts=now_ts)
+    return {
+        "tier": snapshot.effective_tier.value,
+        "tier_expires_at": snapshot.tier_expires_at,
+        "has_premium": snapshot.effective_tier == Tier.PREMIUM,
+        "explicit_consent": snapshot.explicit_consent,
+        "consent_required": not snapshot.explicit_consent,
+        "blocked_reasons": list(snapshot.blocked_reasons),
+    }
+
+
 @router.get("/usage")
 def usage(request: Request) -> dict[str, object]:
     dependencies = request.app.state.dependencies

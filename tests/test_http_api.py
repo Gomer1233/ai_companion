@@ -158,6 +158,23 @@ def test_entitlements_and_usage_return_real_monetization_state(tmp_path: Path) -
     assert usage.json()["explicit_images"]["limit"] == 20
 
 
+def test_explicit_consent_endpoint_updates_backend_owned_state(tmp_path: Path) -> None:
+    client, deps = _make_client(tmp_path)
+    token = _issue_token(client, deps.settings.telegram_token, 209)
+    headers = {"Authorization": f"Bearer {token}"}
+
+    before = client.get("/api/entitlements", headers=headers)
+    response = client.post("/api/consent/explicit", headers=headers, json={"accepted": True})
+    after = client.get("/api/entitlements", headers=headers)
+
+    assert before.status_code == 200
+    assert before.json()["explicit_consent"] is False
+    assert response.status_code == 200
+    assert response.json()["explicit_consent"] is True
+    assert response.json()["consent_required"] is False
+    assert after.json()["explicit_consent"] is True
+
+
 def test_jobs_endpoint_is_owner_only(tmp_path: Path) -> None:
     client, deps = _make_client(tmp_path, OPERATOR_TELEGRAM_IDS="9001")
     owner_token = _issue_token(client, deps.settings.telegram_token, 204)
