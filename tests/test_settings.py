@@ -45,4 +45,4 @@ def test_settings_defaults_telegram_init_freshness_to_session_ttl(tmp_path: Path
     )
 
     assert settings.http_session_ttl_sec == 7200
-    assert settings.http_telegram_init_max_age_sec == 7200
+    assert settings.http_telegram_init_max_age_sec == 14400

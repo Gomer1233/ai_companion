@@ -13,6 +13,7 @@ describe("Mini App API client", () => {
   it("loads backend-owned app state and silently re-auths on 401", async () => {
     const tokenStore = createMemoryTokenStore();
     tokenStore.set({ accessToken: "old-token", expiresAt: 111 });
+    vi.setSystemTime(new Date(1_100_000));
     const fetchImpl = vi
       .fn<typeof fetch>()
       .mockResolvedValueOnce(jsonResponse({ detail: "invalid_token" }, { status: 401 }))
@@ -53,9 +54,10 @@ describe("Mini App API client", () => {
 
     const state = await loadMiniAppState({
       apiBaseUrl: "https://railway.example",
-      initData: "tg-init-data",
+      initData: "auth_date=1000&user={}&hash=test",
       tokenStore,
       fetchImpl,
+      telegramInitMaxAgeSec: 300,
     });
 
     expect(fetchImpl).toHaveBeenNthCalledWith(
@@ -68,7 +70,7 @@ describe("Mini App API client", () => {
       "https://railway.example/api/session/telegram",
       expect.objectContaining({
         method: "POST",
-        body: JSON.stringify({ init_data: "tg-init-data" }),
+        body: JSON.stringify({ init_data: "auth_date=1000&user={}&hash=test" }),
       }),
     );
     expect(fetchImpl).toHaveBeenNthCalledWith(
@@ -80,6 +82,32 @@ describe("Mini App API client", () => {
     expect(state.me.user_id).toBe("42");
     expect(state.characters.items[0].mode).toBe("coach_premium");
     expect(state.entitlements.consent_required).toBe(true);
+    vi.useRealTimers();
+  });
+
+  it("does not retry session exchange with stale Telegram init data on 401", async () => {
+    const tokenStore = createMemoryTokenStore();
+    tokenStore.set({ accessToken: "old-token", expiresAt: 111 });
+    vi.setSystemTime(new Date(1_400_000));
+    const fetchImpl = vi.fn<typeof fetch>().mockResolvedValueOnce(jsonResponse({ detail: "invalid_token" }, { status: 401 }));
+
+    await expect(
+      loadMiniAppState({
+        apiBaseUrl: "https://railway.example",
+        initData: "auth_date=1000&user={}&hash=test",
+        tokenStore,
+        fetchImpl,
+        telegramInitMaxAgeSec: 300,
+      }),
+    ).rejects.toThrow("session_reauth_unavailable");
+
+    expect(fetchImpl).toHaveBeenCalledTimes(1);
+    expect(fetchImpl).not.toHaveBeenCalledWith(
+      "https://railway.example/api/session/telegram",
+      expect.anything(),
+    );
+    expect(tokenStore.get()).toBeNull();
+    vi.useRealTimers();
   });
 
   it("accepts explicit consent through the backend endpoint", async () => {

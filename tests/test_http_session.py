@@ -26,7 +26,6 @@ def _make_settings(tmp_path: Path, **env: str) -> Settings:
         "BOT_DB_PATH": str(tmp_path / "http-session.db"),
         "HTTP_CORS_ORIGINS": "http://localhost:3000",
         "HTTP_SESSION_TTL_SEC": "3600",
-        "HTTP_TELEGRAM_INIT_MAX_AGE_SEC": "90",
         "HTTP_SESSION_RATE_LIMIT_WINDOW_SEC": "60",
         "HTTP_SESSION_RATE_LIMIT_MAX_ATTEMPTS": "2",
     }
@@ -108,7 +107,11 @@ def test_session_exchange_rejects_stale_init_data(tmp_path: Path) -> None:
 
 
 def test_session_exchange_rate_limits_by_client_window(tmp_path: Path) -> None:
-    client, deps = _make_client(tmp_path, HTTP_SESSION_RATE_LIMIT_MAX_ATTEMPTS="2")
+    client, deps = _make_client(
+        tmp_path,
+        HTTP_TELEGRAM_INIT_MAX_AGE_SEC="30",
+        HTTP_SESSION_RATE_LIMIT_MAX_ATTEMPTS="2",
+    )
     stale_auth_date = int(time.time()) - 999
 
     for _ in range(2):

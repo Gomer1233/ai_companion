@@ -64,6 +64,7 @@ type ApiOptions = {
   initData: string;
   tokenStore: TokenStore;
   fetchImpl?: typeof fetch;
+  telegramInitMaxAgeSec?: number;
 };
 
 export function createMemoryTokenStore(): TokenStore {
@@ -134,6 +135,9 @@ async function authorizedJson<T>(options: ApiOptions, path: string, init: Reques
   let response = await fetchImpl(joinUrl(options.apiBaseUrl, path), withAuth(init, firstToken.accessToken));
   if (response.status === 401) {
     options.tokenStore.clear();
+    if (!isTelegramInitDataFresh(options.initData, options.telegramInitMaxAgeSec ?? defaultTelegramInitMaxAgeSec())) {
+      throw new Error("session_reauth_unavailable");
+    }
     const refreshed = await exchangeTelegramSession(options);
     response = await fetchImpl(joinUrl(options.apiBaseUrl, path), withAuth(init, refreshed.accessToken));
   }
@@ -157,4 +161,22 @@ function withAuth(init: RequestInit, accessToken: string): RequestInit {
 
 function joinUrl(baseUrl: string, path: string): string {
   return `${baseUrl.replace(/\/$/, "")}${path}`;
+}
+
+function isTelegramInitDataFresh(initData: string, maxAgeSec: number): boolean {
+  const authDateRaw = new URLSearchParams(initData).get("auth_date");
+  if (!authDateRaw) {
+    return false;
+  }
+  const authDate = Number(authDateRaw);
+  if (!Number.isFinite(authDate)) {
+    return false;
+  }
+  return authDate >= Math.floor(Date.now() / 1000) - maxAgeSec;
+}
+
+function defaultTelegramInitMaxAgeSec(): number {
+  const raw = process.env.NEXT_PUBLIC_TELEGRAM_INIT_MAX_AGE_SEC;
+  const parsed = raw ? Number(raw) : NaN;
+  return Number.isFinite(parsed) && parsed > 0 ? parsed : 7200;
 }

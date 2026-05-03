@@ -175,7 +175,11 @@ class Settings:
             http_port=_get_int(source, "HTTP_PORT", _get_int(source, "PORT", 8000)),
             http_cors_origins=_get_csv_tuple(source, "HTTP_CORS_ORIGINS"),
             http_session_ttl_sec=http_session_ttl_sec,
-            http_telegram_init_max_age_sec=_get_int(source, "HTTP_TELEGRAM_INIT_MAX_AGE_SEC", http_session_ttl_sec),
+            http_telegram_init_max_age_sec=_get_int(
+                source,
+                "HTTP_TELEGRAM_INIT_MAX_AGE_SEC",
+                http_session_ttl_sec * 2,
+            ),
             http_session_rate_limit_window_sec=_get_int(source, "HTTP_SESSION_RATE_LIMIT_WINDOW_SEC", 60),
             http_session_rate_limit_max_attempts=_get_int(source, "HTTP_SESSION_RATE_LIMIT_MAX_ATTEMPTS", 5),
             db_backend=_get_str(source, "DB_BACKEND", "sqlite").lower(),
