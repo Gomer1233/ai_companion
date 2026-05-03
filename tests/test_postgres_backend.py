@@ -95,6 +95,25 @@ def test_postgres_schema_declares_alpha_tables_and_least_privilege_grants() -> N
     assert "grant select, insert, update, delete on all tables in schema public" in normalized_grants
 
 
+def test_postgres_adapter_does_not_bind_empty_params_for_raw_sql() -> None:
+    from src.db.connection import PostgresConnectionAdapter
+
+    class RawConnection:
+        def __init__(self) -> None:
+            self.calls: list[tuple[object, ...]] = []
+
+        def execute(self, *args: object):
+            self.calls.append(args)
+
+    raw = RawConnection()
+    adapter = PostgresConnectionAdapter(raw)
+
+    adapter.execute("SELECT 'payment:%'")
+    adapter.execute("SELECT ?", ("value",))
+
+    assert raw.calls == [("SELECT 'payment:%'",), ("SELECT %s", ("value",))]
+
+
 def test_bootstrap_database_does_not_apply_owner_schema_for_postgres_settings(monkeypatch) -> None:
     from src.db.bootstrap import bootstrap_database
 
