@@ -13,6 +13,13 @@ venv/
 dist/
 build/
 
+# Node / Next.js
+node_modules/
+.next/
+apps/miniapp/.next/
+apps/miniapp/out/
+*.tsbuildinfo
+
 # Environment variables
 .env
 .env.local

@@ -106,6 +106,7 @@ class Settings:
     tbank_fail_url: str
     tbank_notification_url: str
     tbank_webhook_secret: str
+    mini_app_url: str
     operator_telegram_ids: frozenset[int]
 
     @classmethod
@@ -117,6 +118,7 @@ class Settings:
     ) -> "Settings":
         source = env or os.environ
         root = project_root or Path(__file__).resolve().parents[2]
+        http_session_ttl_sec = _get_int(source, "HTTP_SESSION_TTL_SEC", 3600)
         return cls(
             project_root=root,
             telegram_token=_get_str(source, "TELEGRAM_TOKEN"),
@@ -170,10 +172,14 @@ class Settings:
             max_auto_continuations=_get_int(source, "MAX_AUTO_CONTINUATIONS", 2),
             report_xlsx=_get_str(source, "REPORT_XLSX", "user_report.xlsx"),
             http_host=_get_str(source, "HTTP_HOST", "0.0.0.0"),
-            http_port=_get_int(source, "HTTP_PORT", 8000),
+            http_port=_get_int(source, "HTTP_PORT", _get_int(source, "PORT", 8000)),
             http_cors_origins=_get_csv_tuple(source, "HTTP_CORS_ORIGINS"),
-            http_session_ttl_sec=_get_int(source, "HTTP_SESSION_TTL_SEC", 3600),
-            http_telegram_init_max_age_sec=_get_int(source, "HTTP_TELEGRAM_INIT_MAX_AGE_SEC", 90),
+            http_session_ttl_sec=http_session_ttl_sec,
+            http_telegram_init_max_age_sec=_get_int(
+                source,
+                "HTTP_TELEGRAM_INIT_MAX_AGE_SEC",
+                http_session_ttl_sec * 2,
+            ),
             http_session_rate_limit_window_sec=_get_int(source, "HTTP_SESSION_RATE_LIMIT_WINDOW_SEC", 60),
             http_session_rate_limit_max_attempts=_get_int(source, "HTTP_SESSION_RATE_LIMIT_MAX_ATTEMPTS", 5),
             db_backend=_get_str(source, "DB_BACKEND", "sqlite").lower(),
@@ -185,6 +191,7 @@ class Settings:
             tbank_fail_url=_get_str(source, "TBANK_FAIL_URL"),
             tbank_notification_url=_get_str(source, "TBANK_NOTIFICATION_URL"),
             tbank_webhook_secret=_get_str(source, "TBANK_WEBHOOK_SECRET"),
+            mini_app_url=_get_str(source, "MINI_APP_URL"),
             operator_telegram_ids=frozenset(
                 int(value)
                 for value in _get_csv_tuple(source, "OPERATOR_TELEGRAM_IDS")

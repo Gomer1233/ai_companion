@@ -24,7 +24,10 @@ class PostgresConnectionAdapter:
         self._raw_connection.__exit__(exc_type, exc, tb)
 
     def execute(self, sql: str, params: tuple[Any, ...] | None = None):
-        return self._raw_connection.execute(_translate_sqlite_placeholders(sql), params or ())
+        translated_sql = _translate_sqlite_placeholders(sql)
+        if params is None:
+            return self._raw_connection.execute(translated_sql)
+        return self._raw_connection.execute(translated_sql, params)
 
     def cursor(self):
         return PostgresCursorAdapter(self._raw_connection.cursor())
@@ -54,7 +57,10 @@ class PostgresCursorAdapter:
         self._raw_cursor = raw_cursor
 
     def execute(self, sql: str, params: tuple[Any, ...] | None = None):
-        return self._raw_cursor.execute(_translate_sqlite_placeholders(sql), params or ())
+        translated_sql = _translate_sqlite_placeholders(sql)
+        if params is None:
+            return self._raw_cursor.execute(translated_sql)
+        return self._raw_cursor.execute(translated_sql, params)
 
     def fetchone(self):
         return self._raw_cursor.fetchone()

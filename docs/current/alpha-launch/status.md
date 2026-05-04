@@ -22,7 +22,8 @@
 - `ALPHA-004 Provider Matrix + Explicit Policy Layer` is merged to `main`.
 - `ALPHA-005 Monetization Core + Admin Commands` is merged to `main`.
 - `ALPHA-006 Persona Audit + Launch Allowlist Freeze` is merged to `main`.
-- `ALPHA-007 Job Reliability` is implemented on `codex/alpha-007-job-reliability` and ready for review/merge.
+- `ALPHA-007 Job Reliability` is merged to `main`.
+- `ALPHA-008 Mini App Alpha` is ready for review on `codex/alpha-008-mini-app-alpha`.
 - Post-alpha standalone Web direction is captured as an accepted identity/readiness decision: `docs/adr/0002-user-identity-and-standalone-web-readiness.md`.
 
 ## Completed
@@ -110,10 +111,23 @@
   - terminal-state protection for cancelled jobs versus late completion/failure
   - protected owner/operator access for `GET /api/jobs/{job_id}`
   - full local verification passed: `python -m pytest -q`, `python -m ruff check .`, and `python -m mypy`
+- `ALPHA-007 Job Reliability` is merged to `main`
+- `ALPHA-008` has started with:
+  - `ALPHA-007` marked `Done` and `ALPHA-008` marked `In Progress`
+  - scope confirmed from `prs/alpha-008-mini-app-alpha/brief.md`
+  - UI contract confirmed from accepted ADR `docs/adr/0001-lina-midnight-channel-ui.md`
+- `ALPHA-008` now adds:
+  - isolated Next.js Mini App frontend under `apps/miniapp`
+  - Telegram session exchange with backend-issued bearer tokens and silent re-auth on `401`
+  - channel-guide UI with OSD header, access/pass panel, channel rows, selected-channel preview, profile, limits, locked premium states, and restricted 18+ consent card
+  - backend-owned explicit consent mutation through `POST /api/consent/explicit`
+  - Telegram bot `Mini App` keyboard entry point when `MINI_APP_URL` is configured
+  - full local verification passed: `python -m pytest -q`, `python -m ruff check .`, `python -m mypy`, `npm test`, `npm run typecheck`, and `npm run build`
+  - mobile Playwright visual check passed against mocked Railway API responses
 
 ## Next Step
 
-Review and merge `ALPHA-007 Job Reliability`, then start `ALPHA-008 Mini App Alpha`.
+Review and merge `ALPHA-008 Mini App Alpha`, then start `ALPHA-009 Compliance Completion + Alpha Ops`.
 
 ## Risks / Notes
 

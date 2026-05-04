@@ -22,8 +22,11 @@ def me(request: Request) -> dict[str, str | int]:
 
 
 @router.get("/characters")
-def characters(request: Request) -> dict[str, list[dict[str, str]]]:
-    require_session(request)
+def characters(request: Request) -> dict[str, list[dict[str, object]]]:
+    session = require_session(request)
+    dependencies = request.app.state.dependencies
+    service = MonetizationService(dependencies.repositories)
+    now_ts = int(time.time())
     return {
         "items": [
             {
@@ -32,6 +35,10 @@ def characters(request: Request) -> dict[str, list[dict[str, str]]]:
                 "title": item.title,
                 "category": item.category,
                 "default_tier": item.default_tier,
+                "access": {
+                    "allowed": (decision := service.can_use_persona(session.user_ref, item.mode, now_ts)).allowed,
+                    "reasons": list(decision.reasons),
+                },
             }
             for item in build_alpha_launch_catalog()
         ],
@@ -43,6 +50,25 @@ def entitlements(request: Request) -> dict[str, object]:
     session = require_session(request)
     dependencies = request.app.state.dependencies
     snapshot = MonetizationService(dependencies.repositories).get_access_snapshot(session.user_ref, now_ts=int(time.time()))
+    return {
+        "tier": snapshot.effective_tier.value,
+        "tier_expires_at": snapshot.tier_expires_at,
+        "has_premium": snapshot.effective_tier == Tier.PREMIUM,
+        "explicit_consent": snapshot.explicit_consent,
+        "consent_required": not snapshot.explicit_consent,
+        "blocked_reasons": list(snapshot.blocked_reasons),
+    }
+
+
+@router.post("/consent/explicit")
+def explicit_consent(request: Request, payload: dict[str, bool]) -> dict[str, object]:
+    session = require_session(request)
+    if payload.get("accepted") is not True:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="explicit_consent_required")
+    dependencies = request.app.state.dependencies
+    now_ts = int(time.time())
+    dependencies.repositories.set_explicit_consent(session.user_ref, accepted_at=now_ts, source="mini_app")
+    snapshot = MonetizationService(dependencies.repositories).get_access_snapshot(session.user_ref, now_ts=now_ts)
     return {
         "tier": snapshot.effective_tier.value,
         "tier_expires_at": snapshot.tier_expires_at,

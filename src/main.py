@@ -33,7 +33,7 @@ from aiogram import Bot, Dispatcher, types, F
 from aiogram.filters import Command
 from aiogram.types import InlineKeyboardMarkup, InlineKeyboardButton
 from aiogram.types import LabeledPrice
-from aiogram.types import ReplyKeyboardMarkup, KeyboardButton
+from aiogram.types import ReplyKeyboardMarkup, KeyboardButton, WebAppInfo
 from aiogram.types import BufferedInputFile
 from aiogram.types.input_file import FSInputFile
 
@@ -1855,30 +1855,54 @@ def build_models_keyboard(models: List[str]) -> InlineKeyboardMarkup:
 
 TARIFF_STATUS_BUTTON = "\u041e\u0441\u0442\u0430\u0442\u043e\u043a \u043f\u043e \u0442\u0430\u0440\u0438\u0444\u0443"
 BUY_PREMIUM_BUTTON = "\u041a\u0443\u043f\u0438\u0442\u044c Premium"
+MINI_APP_BUTTON = "Mini App"
+
+
+def _mini_app_menu_row() -> list[KeyboardButton]:
+    if not SETTINGS.mini_app_url:
+        return []
+    return [KeyboardButton(text=MINI_APP_BUTTON)]
+
+
+def build_mini_app_inline_keyboard() -> InlineKeyboardMarkup | None:
+    if not SETTINGS.mini_app_url:
+        return None
+    return InlineKeyboardMarkup(
+        inline_keyboard=[
+            [InlineKeyboardButton(text="Open Mini App", web_app=WebAppInfo(url=SETTINGS.mini_app_url))]
+        ]
+    )
+
+
+def _keyboard_rows(*rows: list[KeyboardButton]) -> list[list[KeyboardButton]]:
+    return [row for row in rows if row]
 
 MAIN_MENU = ReplyKeyboardMarkup(
-    keyboard=[
+    keyboard=_keyboard_rows(
         [KeyboardButton(text="Режим"), KeyboardButton(text="Сброс всего")],
         [KeyboardButton(text=TARIFF_STATUS_BUTTON), KeyboardButton(text=BUY_PREMIUM_BUTTON)],
-    ],
+        _mini_app_menu_row(),
+    ),
     resize_keyboard=True,
 )
 
 GEN_MENU = ReplyKeyboardMarkup(
-    keyboard=[
+    keyboard=_keyboard_rows(
         [KeyboardButton(text="Режим"), KeyboardButton(text="Сброс всего"), KeyboardButton(text="Сброс персонажа")],
         [KeyboardButton(text="Хочу фото")],
         [KeyboardButton(text=TARIFF_STATUS_BUTTON), KeyboardButton(text=BUY_PREMIUM_BUTTON)],
-    ],
+        _mini_app_menu_row(),
+    ),
     resize_keyboard=True,
 )
 
 RAP_MENU = ReplyKeyboardMarkup(
-    keyboard=[
+    keyboard=_keyboard_rows(
         [KeyboardButton(text="Режим"), KeyboardButton(text="Сброс всего"), KeyboardButton(text="Сброс персонажа")],
         [KeyboardButton(text="🎤 Стиль"), KeyboardButton(text="Хочу фото")],
         [KeyboardButton(text=TARIFF_STATUS_BUTTON), KeyboardButton(text=BUY_PREMIUM_BUTTON)],
-    ],
+        _mini_app_menu_row(),
+    ),
     resize_keyboard=True,
 )
 
@@ -1913,6 +1937,15 @@ async def buy_premium_btn(message: types.Message):
         "\u0412 Telegram \u0434\u043b\u044f \u0446\u0438\u0444\u0440\u043e\u0432\u043e\u0433\u043e \u0434\u043e\u0441\u0442\u0443\u043f\u0430 \u0434\u043e\u0441\u0442\u0443\u043f\u043d\u044b Stars/XTR.",
         reply_markup=build_stars_buy_keyboard(lifetime_available=lifetime_available),
     )
+
+
+@dp.message(F.text == MINI_APP_BUTTON)
+async def mini_app_btn(message: types.Message):
+    keyboard = build_mini_app_inline_keyboard()
+    if keyboard is None:
+        await message.answer("Mini App is not configured.")
+        return
+    await message.answer("Open Lina Mini App with the button below.", reply_markup=keyboard)
 
 
 @dp.callback_query(F.data.startswith("buy_stars:"))
@@ -2187,6 +2220,9 @@ async def cmd_start(message: types.Message):
         "Готово. Выбери режим кнопкой «Режим» или просто напиши сообщение.",
         reply_markup=menu,
     )
+    keyboard = build_mini_app_inline_keyboard()
+    if keyboard is not None:
+        await message.answer("Mini App opens from this inline button.", reply_markup=keyboard)
 
 
 MODEL_SELECTION_DISABLED_TEXT = (
