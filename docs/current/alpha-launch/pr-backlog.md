@@ -11,7 +11,7 @@
 | ALPHA-007 | Job Reliability | ALPHA-005 | Done | `prs/alpha-007-job-reliability/brief.md` |
 | ALPHA-008 | Mini App Alpha | ALPHA-006, ALPHA-007 | Done | `prs/alpha-008-mini-app-alpha/brief.md` |
 | ALPHA-009 | Compliance Completion + Alpha Ops | ALPHA-006 | Done | `prs/alpha-009-compliance-ops/brief.md` |
-| ALPHA-010 | Deploy to Railway + Vercel + Supabase | ALPHA-008, ALPHA-009 | Ready | `prs/alpha-010-deploy/brief.md` |
+| ALPHA-010 | Deploy to Railway + Vercel + Supabase | ALPHA-008, ALPHA-009 | Done | `prs/alpha-010-deploy/brief.md` |
 
 ## Post-Alpha Web Backlog
 

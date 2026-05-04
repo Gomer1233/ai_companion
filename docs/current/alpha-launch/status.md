@@ -4,7 +4,7 @@
 
 - Name: `alpha-launch`
 - Current date baseline: `2026-04-06`
-- State: `In Progress`
+- State: `Done`
 - Depends on: completed `multichannel-core` foundation plus follow-on launcher consolidation
 
 ## Current Source of Truth
@@ -25,7 +25,7 @@
 - `ALPHA-007 Job Reliability` is merged to `main`.
 - `ALPHA-008 Mini App Alpha` is merged to `main`.
 - `ALPHA-009 Compliance Completion + Alpha Ops` is merged to `main`.
-- `ALPHA-010 Deploy to Railway + Vercel + Supabase` is ready for review on `codex/alpha-010-deploy`.
+- `ALPHA-010 Deploy to Railway + Vercel + Supabase` is merged to `main`.
 - Post-alpha standalone Web direction is captured as an accepted identity/readiness decision: `docs/adr/0002-user-identity-and-standalone-web-readiness.md`.
 
 ## Completed
@@ -134,10 +134,17 @@
   - support, export, deletion/account-removal, abuse, logging, secrets, backup, and restore runbook
   - closed alpha cohort and support process
   - documented implementation gaps for per-user export and full account deletion
+- `ALPHA-010` now adds:
+  - Railway production deploy evidence for `ai-companion-bot`
+  - Vercel production deploy evidence for `https://miniapp-xi-smoky.vercel.app`
+  - repeatable launch smoke CLI under `src/launch_smoke.py`
+  - deploy, staging, rollback, and incident runbooks
+  - public and authenticated production smoke checks against Railway and Vercel
+  - Railway deploy config without schema DDL in deploy/startup, preserving the ALPHA-003 non-owner runtime `DATABASE_URL` contract
 
 ## Next Step
 
-Review and merge `ALPHA-010 Deploy to Railway + Vercel + Supabase`.
+Alpha launch is complete. Next planning step is a separate post-alpha Web initiative starting with `WEB-001 Standalone Web Identity`, or operational alpha monitoring using the ALPHA-010 smoke/runbook package.
 
 ## Risks / Notes
 
