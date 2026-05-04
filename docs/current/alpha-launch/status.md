@@ -137,7 +137,7 @@
 
 ## Next Step
 
-Complete `ALPHA-010 Deploy to Railway + Vercel + Supabase`.
+Complete `ALPHA-010 Deploy to Railway + Vercel + Supabase`: Railway production deploy is blocked on Railway CLI/API authorization and source-branch confirmation; Vercel production and public/authenticated smoke checks are documented.
 
 ## Risks / Notes
 
