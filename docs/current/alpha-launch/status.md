@@ -127,7 +127,9 @@
   - mobile Playwright visual check passed against mocked Railway API responses
 - `ALPHA-009` now adds:
   - closed-alpha privacy policy and terms drafts
-  - explicit 18+ consent and safety copy contract
+  - explicit 18+ consent and safety copy contract applied to the Mini App consent gate
+  - `/support` bot route that forwards alpha support requests to configured operators
+  - executable explicit-consent revocation script with admin audit event recording
   - support, export, deletion/account-removal, abuse, logging, secrets, backup, and restore runbook
   - closed alpha cohort and support process
   - documented implementation gaps for per-user export and full account deletion

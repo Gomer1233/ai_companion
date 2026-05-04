@@ -1077,6 +1077,32 @@ class SQLiteRepositories:
             conn.close()
         return ExplicitConsent(user_ref=user_ref, accepted_at=int(accepted_at), revoked_at=None, source=source)
 
+    def revoke_explicit_consent(
+        self,
+        user_ref: UserRef,
+        *,
+        revoked_at: int,
+        source: str,
+    ) -> ExplicitConsent | None:
+        user_id = self._user_id(user_ref)
+        existing = self.load_explicit_consent(user_ref)
+        if existing is None or existing.revoked_at is not None:
+            return existing
+        conn = self._connect()
+        try:
+            conn.execute(
+                """
+                UPDATE explicit_consent
+                SET revoked_at=?, source=?
+                WHERE user_id=? AND revoked_at IS NULL
+                """,
+                (int(revoked_at), source, user_id),
+            )
+            conn.commit()
+        finally:
+            conn.close()
+        return self.load_explicit_consent(user_ref)
+
     def load_explicit_consent(self, user_ref: UserRef) -> ExplicitConsent | None:
         user_id = self._user_id(user_ref)
         conn = self._connect()

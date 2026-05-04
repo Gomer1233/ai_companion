@@ -34,6 +34,13 @@ During alpha:
 
 ## Support Intake
 
+Primary user route:
+
+- Users send `/support <category> <details>` to `@Lina_YourFriend_Bot`.
+- The bot forwards the request to every Telegram id configured in `OPERATOR_TELEGRAM_IDS`.
+- `OPERATOR_TELEGRAM_IDS` is the support owner configuration source for alpha. At least one active operator id must be configured before adding users to the closed alpha.
+- Operators handle the request in Telegram and record the resolution in the support log.
+
 Supported request categories:
 
 - login or Mini App session issue;
@@ -80,7 +87,9 @@ Current implementation note: `src/export_user_report.py` exports broad SQLite ev
 2. Resolve the Telegram identity to `UserRef`.
 3. Freeze new support/payment actions for the user while the request is handled.
 4. Reset removable conversation state with repository-backed reset paths where available.
-5. Revoke explicit consent if requested or if the account is being removed.
+5. Revoke explicit consent if requested or if the account is being removed:
+   - `python -m src.revoke_explicit_consent <telegram_user_id> --operator-id <operator_id> --reason <reason> --confirm`
+   - The script sets `explicit_consent.revoked_at`, changes `source` to the operator revoke source, and writes an `admin_audit_events` row.
 6. Revoke active manual entitlements when removal requires access termination.
 7. Minimize or delete removable profile, message, and event data where operationally possible.
 8. Retain payment, entitlement, abuse, fraud, and operator audit records when needed for disputes, accounting, or safety.
@@ -175,7 +184,7 @@ Restore drill:
 
 - Privacy policy and terms reviewed for the closed alpha.
 - Explicit 18+ consent copy installed or matched in Mini App copy.
-- Support channel and operator owner assigned.
+- `/support` route tested through `@Lina_YourFriend_Bot`, with at least one operator id in `OPERATOR_TELEGRAM_IDS`.
 - Export/deletion request handling process tested manually.
 - Abuse triage and explicit revocation process understood by operators.
 - Secrets stored in Railway/Vercel env stores, not Git.

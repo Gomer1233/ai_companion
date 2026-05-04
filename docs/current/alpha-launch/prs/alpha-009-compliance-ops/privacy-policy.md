@@ -89,4 +89,4 @@ Secrets must be stored in platform environment-variable stores, not committed to
 
 ## Contact
 
-Alpha support and privacy requests are handled through the closed alpha support channel defined in `ops-runbook.md`.
+Alpha support and privacy requests are handled by sending `/support <category> <details>` to `@Lina_YourFriend_Bot`. The bot forwards requests to the configured alpha operators listed in `OPERATOR_TELEGRAM_IDS`.

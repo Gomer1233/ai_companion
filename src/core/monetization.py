@@ -191,6 +191,13 @@ class MonetizationRepositories(Protocol):
     def load_active_entitlements(self, user_ref: UserRef, now_ts: int) -> list[Entitlement]: ...
     def load_usage(self, user_ref: UserRef, counter_key: str, *, window_start: int) -> UsageCounter: ...
     def load_explicit_consent(self, user_ref: UserRef) -> ExplicitConsent | None: ...
+    def revoke_explicit_consent(
+        self,
+        user_ref: UserRef,
+        *,
+        revoked_at: int,
+        source: str,
+    ) -> ExplicitConsent | None: ...
     def increment_usage(
         self,
         user_ref: UserRef,
