@@ -71,7 +71,7 @@ describe("Mini App page", () => {
     render(<Page />);
     expect(await screen.findByText("18+ LOCKED")).toBeInTheDocument();
 
-    fireEvent.click(screen.getByRole("button", { name: "Confirm 18+ Access" }));
+    fireEvent.click(screen.getByRole("button", { name: "I am 18+ and accept" }));
 
     await waitFor(() => expect(loadMiniAppState).toHaveBeenCalledTimes(2));
     expect(screen.queryByText("18+ LOCKED")).not.toBeInTheDocument();
