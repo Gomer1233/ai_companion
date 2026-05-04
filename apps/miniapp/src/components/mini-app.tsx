@@ -9,7 +9,7 @@ type Props = {
   onAcceptExplicit: () => void | Promise<void>;
 };
 
-type Panel = "guide" | "access" | "profile";
+type Panel = "home" | "guide" | "access" | "profile";
 
 export function MiniApp({ state, onAcceptExplicit }: Props) {
   const [selectedId, setSelectedId] = useState<string | null>(state.characters.items[0]?.id ?? null);
@@ -130,6 +130,17 @@ export function MiniApp({ state, onAcceptExplicit }: Props) {
         ) : null}
       </section>
 
+      {activePanel === "home" ? (
+        <section className="panel-stack" role="tabpanel" aria-label="Home">
+          <article className="info-panel">
+            <p className="label">Now airing</p>
+            <h2>{selected?.title ?? "Channel Guide"}</h2>
+            <p>{selected ? `${selectedChannel} ${channelHint(selected.category)}` : "Choose a channel from Chats."}</p>
+            <p>{selected ? `${accessLabel(selected)} / ${passLabel}` : "No channel selected"}</p>
+          </article>
+        </section>
+      ) : null}
+
       {activePanel === "guide" ? (
         <section className="guide" id="channels" role="tabpanel" aria-label="Guide">
           {state.characters.items.map((item, index) => {
@@ -216,7 +227,7 @@ export function MiniApp({ state, onAcceptExplicit }: Props) {
       ) : null}
 
       <nav className="bottom-nav" aria-label="Mini App sections">
-        <button type="button" aria-selected="false" onClick={() => setActivePanel("guide")}>
+        <button type="button" aria-selected={activePanel === "home"} onClick={() => setActivePanel("home")}>
           Home
         </button>
         <button type="button" aria-selected={activePanel === "guide"} onClick={() => setActivePanel("guide")}>

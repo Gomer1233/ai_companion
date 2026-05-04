@@ -143,6 +143,17 @@ describe("MiniApp", () => {
     expect(screen.getByText("/support miniapp")).toBeInTheDocument();
   });
 
+  it("makes Home a distinct active destination", () => {
+    render(<MiniApp state={state} onAcceptExplicit={vi.fn()} />);
+
+    fireEvent.click(screen.getByRole("button", { name: "Profile" }));
+    fireEvent.click(screen.getByRole("button", { name: "Home" }));
+
+    expect(screen.getByRole("button", { name: "Home" })).toHaveAttribute("aria-selected", "true");
+    expect(screen.getByRole("button", { name: "Chats" })).toHaveAttribute("aria-selected", "false");
+    expect(screen.getByRole("tabpanel", { name: "Home" })).toHaveTextContent("Now airing");
+  });
+
   it("sends explicit locked selections to the consent contract", () => {
     render(<MiniApp state={state} onAcceptExplicit={vi.fn()} />);
 
