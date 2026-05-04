@@ -1,5 +1,7 @@
 # ALPHA-014: Alpha Product Readiness + Ops Polish
 
+Plan reference: `../../execution-plan.md`
+
 ## Goal
 
 Close product-readiness and operations gaps after Mini App text chat and image jobs are in place.

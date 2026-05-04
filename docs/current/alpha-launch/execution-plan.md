@@ -1,7 +1,7 @@
 ﻿# План Инициативы: Alpha Launch для Lina AI
 
 ## Summary
-Цель: выпустить живую explicit 18+ alpha как один Telegram-бот с polling на Railway, с Telegram Mini App как вспомогательным UI на Vercel, и с Supabase Postgres как единственным production backend store.
+Цель: выпустить живую explicit 18+ alpha как Telegram-linked продукт: Railway hosts the bot runtime and backend API, Vercel hosts the Mini App client, and Supabase Postgres is the production backend store. The Mini App started as an auxiliary guide in `ALPHA-008`, but the active alpha direction is to productize it into a chat-first Telegram Mini App client through `ALPHA-011` through `ALPHA-014`.
 
 Эта инициатива является follow-on к завершённому циклу `multichannel-core` и использует его как foundation, но не переписывает его историю.
 
@@ -515,10 +515,13 @@ Turn the Mini App from a channel guide into a useful chat surface by giving each
 9. `Compliance Completion + Alpha Ops`
 10. `Deploy to Railway + Vercel + Supabase`
 11. `Mini App Chat Foundation`
+12. `Mini App App Shell + Chat UX`
+13. `Mini App Image Jobs`
+14. `Alpha Product Readiness + Ops Polish`
 
 ## Post-Alpha Web Direction
 
-Не включать standalone Web identity в alpha launch scope, но сохранить путь к нему после Mini App chat foundation:
+Не включать standalone Web identity в alpha launch scope, но сохранить путь к нему после productized Mini App chain through `ALPHA-014`:
 
 1. `WEB-001 Standalone Web Identity`
 2. `WEB-002 Standalone Web Shell`

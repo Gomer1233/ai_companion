@@ -1,5 +1,7 @@
 # ALPHA-012: Mini App App Shell + Chat UX
 
+Plan reference: `../../execution-plan.md`
+
 ## Goal
 
 Make the Mini App feel like a coherent chat-first application after ALPHA-011 proves the backend chat foundation.

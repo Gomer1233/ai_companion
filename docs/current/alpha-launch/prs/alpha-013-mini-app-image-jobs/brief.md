@@ -1,5 +1,7 @@
 # ALPHA-013: Mini App Image Jobs
 
+Plan reference: `../../execution-plan.md`
+
 ## Goal
 
 Add Mini App image generation through the existing backend job lifecycle after text chat is functional.

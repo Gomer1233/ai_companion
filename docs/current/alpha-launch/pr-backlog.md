@@ -30,11 +30,11 @@ These are still alpha Mini App items, not standalone Web work. Identity remains 
 
 ## Post-Alpha Web Backlog
 
-These items are intentionally outside alpha launch scope. They preserve the product direction that standalone Web becomes a full client after the Telegram Mini App chat foundation exists. `ALPHA-011` is not standalone Web identity work; it is the first Mini App chat foundation for the existing Telegram-linked alpha cohort.
+These items are intentionally outside alpha launch scope. They preserve the product direction that standalone Web becomes a full client after the alpha Mini App follow-up chain is productized through `ALPHA-014`. `ALPHA-011` through `ALPHA-014` are not standalone Web identity work; they are Telegram-linked Mini App product work for the existing alpha cohort.
 
 | Item | Title | Depends On | Status |
 | --- | --- | --- | --- |
-| WEB-001 | Standalone Web Identity | ALPHA-011 | Planned |
+| WEB-001 | Standalone Web Identity | ALPHA-014 | Planned |
 | WEB-002 | Standalone Web Shell | WEB-001 | Planned |
 | WEB-003 | Web Chat | WEB-002 | Planned |
 | WEB-004 | Web Monetization | WEB-003 | Planned |
