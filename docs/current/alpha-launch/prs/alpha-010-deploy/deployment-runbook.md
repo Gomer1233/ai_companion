@@ -25,8 +25,9 @@ Staging:
 
 Source branch:
 
-- Production Railway must deploy from `main`.
-- The old `codex/alpha-001-refactor-boundaries` binding is not valid for alpha launch. If Railway UI still shows that branch, switch the production source branch to `main` before enabling auto-deploy.
+- Production Railway release deploys can be performed with `railway up` from a clean, reviewed branch or `main`.
+- Auto-deploy from GitHub should point at `main` before it is relied on for unattended production deploys.
+- The old `codex/alpha-001-refactor-boundaries` binding is not valid for alpha launch. Do not use `railway redeploy --from-source` while Railway still shows that branch.
 
 Build/deploy config:
 
@@ -53,9 +54,11 @@ Required Railway variables:
 Deploy steps:
 
 1. Confirm `main` contains the intended PR merge commit.
-2. Confirm Railway source branch is `main`.
-3. Confirm required variables are set in Railway production.
-4. Trigger deploy from Railway or push to `main` if auto-deploy is enabled.
+2. Confirm required variables are set in Railway production.
+3. From a clean release workspace, run:
+   - `npx @railway/cli link --project lina-ai-alpha --environment production --service ai-companion-bot`
+   - `npx @railway/cli up --detach --service ai-companion-bot --message "<release message>"`
+4. If GitHub auto-deploy is enabled and confirmed to point at `main`, a push to `main` can replace the manual `railway up` step.
 5. Wait for deployment success.
 6. Check:
    - `GET https://ai-companion-bot-production.up.railway.app/healthz`
@@ -124,6 +127,25 @@ python -m src.launch_smoke `
 ```
 
 Authenticated smoke uses `TELEGRAM_TOKEN` from the environment to sign Telegram Mini App init data. It mutates backend state for the smoke user by accepting explicit consent, so use a dedicated smoke user id only.
+
+## Staging Path
+
+Staging should be exercised before broadening the alpha cohort:
+
+- Railway: create or link a staging environment/service that uses the same `railway.json` start/predeploy/healthcheck behavior.
+- Vercel: use a preview deployment or staging alias with `NEXT_PUBLIC_API_BASE_URL` pointed at the staging Railway backend.
+- Postgres: use a separate staging Postgres database or schema, never production data.
+- Telegram: use a separate staging bot token if Telegram end-to-end behavior is tested.
+
+Minimum staging smoke:
+
+```powershell
+python -m src.launch_smoke `
+  --backend-url <staging-railway-url> `
+  --frontend-url <staging-vercel-url> `
+  --exercise-auth `
+  --telegram-user-id 900000010
+```
 
 ## Rollback
 

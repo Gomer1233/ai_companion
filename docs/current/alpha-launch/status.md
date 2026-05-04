@@ -25,7 +25,7 @@
 - `ALPHA-007 Job Reliability` is merged to `main`.
 - `ALPHA-008 Mini App Alpha` is merged to `main`.
 - `ALPHA-009 Compliance Completion + Alpha Ops` is merged to `main`.
-- `ALPHA-010 Deploy to Railway + Vercel + Supabase` has started.
+- `ALPHA-010 Deploy to Railway + Vercel + Supabase` is ready for review on `codex/alpha-010-deploy`.
 - Post-alpha standalone Web direction is captured as an accepted identity/readiness decision: `docs/adr/0002-user-identity-and-standalone-web-readiness.md`.
 
 ## Completed
@@ -137,7 +137,7 @@
 
 ## Next Step
 
-Complete `ALPHA-010 Deploy to Railway + Vercel + Supabase`: Railway production deploy is blocked on Railway CLI/API authorization and source-branch confirmation; Vercel production and public/authenticated smoke checks are documented.
+Review and merge `ALPHA-010 Deploy to Railway + Vercel + Supabase`.
 
 ## Risks / Notes
 

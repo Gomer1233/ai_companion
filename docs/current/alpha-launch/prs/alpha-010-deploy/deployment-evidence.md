@@ -32,6 +32,20 @@ Verification:
 
 ## Railway Production
 
+Deployment:
+
+- Deployment id: `9aee7536-5e5c-444b-adcf-4b73fa1c5ce6`
+- Deploy method: `npx @railway/cli up --detach --service ai-companion-bot --message "Deploy ALPHA-010 smokeable backend"`
+- Result: `SUCCESS`
+- Service status: active deployment `9aee7536-5e5c-444b-adcf-4b73fa1c5ce6`, status `SUCCESS`, stopped `false`
+
+Runtime log notes:
+
+- Uvicorn started on `0.0.0.0:8000`.
+- Aiogram polling started for `@Lina_YourFriend_Bot`.
+- A transient Telegram `getUpdates` conflict appeared during rolling replacement, then polling reported `Connection established`.
+- `/healthz` and `/readyz` returned `200`.
+
 Public checks:
 
 ```text
@@ -51,21 +65,7 @@ PASS explicit_consent: 200 {'tier': 'free', 'tier_expires_at': None, 'has_premiu
 PASS job_lookup_protected: 404
 ```
 
-Open issue:
-
-- Railway CLI is not authenticated in this workspace: `Unauthorized. Please login with railway login`.
-- Railway MCP/GraphQL OAuth previously returned `Not Authorized` for deployment reads/writes.
-- Railway production source branch must be confirmed as `main`; previous UI state showed `codex/alpha-001-refactor-boundaries`.
-- Backend runtime must be redeployed from `main` after ALPHA-009 merge before ALPHA-010 can be marked ready.
-
-Next Railway action:
-
-```powershell
-npx @railway/cli login --browserless
-npx @railway/cli status
-```
-
-After Railway login, confirm project/environment/service, switch source branch to `main` if needed, trigger a production deploy, and rerun:
+Production smoke command:
 
 ```powershell
 python -m src.launch_smoke `
@@ -75,3 +75,6 @@ python -m src.launch_smoke `
   --telegram-user-id 900000010
 ```
 
+## Remaining Operational Note
+
+Railway production can be deployed with `railway up`, which was exercised above. GitHub auto-deploy source binding should still be corrected to `main` before relying on `redeploy --from-source` or unattended auto-deploys, because earlier deployment metadata showed the old branch `codex/alpha-001-refactor-boundaries`.
