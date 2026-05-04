@@ -97,7 +97,13 @@ describe("MiniApp", () => {
     const onAcceptExplicit = vi.fn();
 
     render(<MiniApp state={state} onAcceptExplicit={onAcceptExplicit} />);
-    fireEvent.click(screen.getByRole("button", { name: "Confirm 18+ Access" }));
+    expect(screen.getByText("18+ explicit access")).toBeInTheDocument();
+    expect(
+      screen.getByText(
+        /This area may include explicit sexual or adult AI content.*you will not request illegal, non-consensual, exploitative, minor-related, abusive, or harmful content\./,
+      ),
+    ).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "I am 18+ and accept" }));
 
     expect(onAcceptExplicit).toHaveBeenCalledOnce();
   });

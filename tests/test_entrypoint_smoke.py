@@ -424,6 +424,35 @@ async def test_operator_command_handlers_grant_list_and_revoke(module_loader, mo
 
 
 @pytest.mark.asyncio
+async def test_support_command_forwards_request_to_configured_operators(module_loader, monkeypatch):
+    from tests.support import FakeMessage
+
+    module = module_loader("src.main", env={"OPERATOR_TELEGRAM_IDS": "9001,9002"})
+    module.init_db()
+    sent: list[tuple[int, str]] = []
+
+    class FakeBot:
+        async def send_message(self, chat_id, text, **kwargs):
+            sent.append((chat_id, text))
+
+    monkeypatch.setattr(module, "bot", FakeBot())
+    message = FakeMessage(
+        "/support deletion please remove explicit access",
+        user_id=61040,
+        chat_id=61040,
+        message_id=7,
+        username="alpha_user",
+    )
+
+    await module.cmd_support(message)
+
+    assert {chat_id for chat_id, _ in sent} == {9001, 9002}
+    assert all("support_request" in text for _, text in sent)
+    assert all("user_id=61040" in text for _, text in sent)
+    assert "Report received" in message.answers[-1]["text"]
+
+
+@pytest.mark.asyncio
 async def test_operator_command_rejects_non_operator(module_loader):
     from tests.support import FakeMessage
 

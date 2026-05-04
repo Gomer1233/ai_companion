@@ -78,11 +78,15 @@ export function MiniApp({ state, onAcceptExplicit }: Props) {
           <article className="channel-row restricted consent-row">
             <div className="channel-number">CH 18+</div>
             <div className="channel-copy">
-              <h3>Restricted 18+ Channel</h3>
-              <p>Age-gated access is confirmed by the backend before explicit channels open.</p>
+              <h3>18+ explicit access</h3>
+              <p>
+                This area may include explicit sexual or adult AI content. By continuing, you confirm that you are at least
+                18 years old and that you will not request illegal, non-consensual, exploitative, minor-related, abusive, or
+                harmful content.
+              </p>
             </div>
             <button className="danger-command" type="button" onClick={onAcceptExplicit}>
-              Confirm 18+ Access
+              I am 18+ and accept
             </button>
           </article>
         ) : null}

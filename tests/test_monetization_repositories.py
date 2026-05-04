@@ -55,6 +55,15 @@ def test_entitlements_usage_and_explicit_consent_round_trip(tmp_path) -> None:
     assert consent is not None
     assert consent.accepted_at == 1_234
     assert consent.revoked_at is None
+    revoked_consent = repo.revoke_explicit_consent(
+        user_ref,
+        revoked_at=1_500,
+        source="operator:9001:revoke",
+    )
+    assert revoked_consent is not None
+    assert revoked_consent.accepted_at == 1_234
+    assert revoked_consent.revoked_at == 1_500
+    assert revoked_consent.source == "operator:9001:revoke"
 
     revoked = repo.revoke_entitlements(
         user_ref,
@@ -65,6 +74,38 @@ def test_entitlements_usage_and_explicit_consent_round_trip(tmp_path) -> None:
     )
     assert revoked == 1
     assert repo.load_active_entitlements(user_ref, now_ts=1_700) == []
+
+
+def test_revoke_explicit_consent_script_records_audit(tmp_path, monkeypatch) -> None:
+    db_path, repo = _make_repo(tmp_path)
+    user_ref = UserRef("51005")
+    repo.set_explicit_consent(user_ref, accepted_at=1_234, source="telegram")
+    monkeypatch.setenv("BOT_DB_PATH", db_path)
+    monkeypatch.setenv("DB_BACKEND", "sqlite")
+
+    from src.revoke_explicit_consent import revoke_explicit_consent
+
+    result = revoke_explicit_consent(
+        target_user_id=51005,
+        operator_id="9001",
+        reason="support_request",
+        now_ts=1_600,
+        project_root=tmp_path,
+    )
+
+    consent = repo.load_explicit_consent(user_ref)
+    assert result == "revoked"
+    assert consent is not None
+    assert consent.revoked_at == 1_600
+    with sqlite3.connect(db_path) as conn:
+        row = conn.execute(
+            """
+            SELECT operator_user_id, target_user_id, action, result, reason
+            FROM admin_audit_events
+            WHERE action='explicit_consent_revoke'
+            """
+        ).fetchone()
+    assert row == ("9001", 51005, "explicit_consent_revoke", "revoked", "support_request")
 
 
 def test_payment_order_fulfillment_is_idempotent_and_reuses_existing_entitlement(tmp_path) -> None:

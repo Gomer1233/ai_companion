@@ -2570,6 +2570,54 @@ async def cmd_reset(message: types.Message):
     )
 
 
+@dp.message(Command("support"))
+async def cmd_support(message: types.Message):
+    details = (message.text or "").partition(" ")[2].strip()
+    if not details:
+        await message.answer(
+            "usage: /support <login|payment|privacy|deletion|abuse|other> <details>\n"
+            "Do not include passwords, payment card numbers, private documents, or provider keys."
+        )
+        return
+    if not OPERATOR_TELEGRAM_IDS:
+        await message.answer("Support route is not configured. Try again later.")
+        return
+
+    user = message.from_user
+    chat_id = int(message.chat.id) if message.chat else 0
+    username = f"@{user.username}" if user.username else "-"
+    notice = (
+        "support_request\n"
+        f"user_id={int(user.id)} username={username} first_name={user.first_name or '-'}\n"
+        f"chat_id={chat_id} message_id={int(message.message_id)}\n\n"
+        f"{details[:1500]}"
+    )
+    forwarded = 0
+    for operator_id in sorted(OPERATOR_TELEGRAM_IDS):
+        try:
+            await bot.send_message(operator_id, notice)
+            forwarded += 1
+        except Exception:
+            logging.exception("Failed to forward support request to operator_id=%s user_id=%s", operator_id, user.id)
+
+    log_user_event(
+        ts=int(time.time()),
+        user_id=int(user.id),
+        chat_id=chat_id,
+        username=(user.username or ""),
+        first_name=(user.first_name or ""),
+        event_type="support_request",
+        message_id=int(message.message_id),
+        text_len=len(details),
+        ok=1 if forwarded else 0,
+        note=f"forwarded={forwarded}",
+    )
+    if forwarded:
+        await message.answer("Report received. An operator will review it. Access may be limited while the review is open.")
+    else:
+        await message.answer("Could not notify support. Try again later.")
+
+
 def _operator_user_ref(message: types.Message) -> UserRef:
     return legacy_user_ref(int(message.from_user.id))
 
