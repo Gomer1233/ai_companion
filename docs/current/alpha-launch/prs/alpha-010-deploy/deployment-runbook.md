@@ -33,7 +33,7 @@ Build/deploy config:
 
 - `railway.json` uses Railpack.
 - Start command: `python -m src.main`.
-- Pre-deploy command applies the Postgres schema through owner-capable `DATABASE_URL`.
+- No Railway pre-deploy or startup command runs schema DDL.
 - Healthcheck path: `/healthz`.
 
 Required Railway variables:
@@ -41,7 +41,7 @@ Required Railway variables:
 - `TELEGRAM_TOKEN`
 - `MINI_APP_URL=https://miniapp-xi-smoky.vercel.app`
 - `DB_BACKEND=postgres`
-- `DATABASE_URL`
+- `DATABASE_URL` with the non-owner app role only
 - `HTTP_CORS_ORIGINS=https://miniapp-xi-smoky.vercel.app`
 - `HTTP_TELEGRAM_INIT_MAX_AGE_SEC=7200`
 - provider keys for the selected text/image providers
@@ -55,15 +55,16 @@ Deploy steps:
 
 1. Confirm `main` contains the intended PR merge commit.
 2. Confirm required variables are set in Railway production.
-3. From a clean release workspace, run:
+3. Confirm schema migrations were applied out-of-band with an owner/admin credential, following `docs/current/alpha-launch/prs/alpha-003-postgres-cutover/cutover-runbook.md`.
+4. From a clean release workspace, run:
    - `npx @railway/cli link --project lina-ai-alpha --environment production --service ai-companion-bot`
    - `npx @railway/cli up --detach --service ai-companion-bot --message "<release message>"`
-4. If GitHub auto-deploy is enabled and confirmed to point at `main`, a push to `main` can replace the manual `railway up` step.
-5. Wait for deployment success.
-6. Check:
+5. If GitHub auto-deploy is enabled and confirmed to point at `main`, a push to `main` can replace the manual `railway up` step.
+6. Wait for deployment success.
+7. Check:
    - `GET https://ai-companion-bot-production.up.railway.app/healthz`
    - `GET https://ai-companion-bot-production.up.railway.app/readyz`
-7. Open Railway logs and confirm the bot polling loop starts without token, database, provider, or schema errors.
+8. Open Railway logs and confirm the bot polling loop starts without token, database, provider, or schema errors.
 
 ## Vercel Mini App
 
@@ -101,8 +102,8 @@ Production database stance:
 Required checks:
 
 1. `DB_BACKEND=postgres` is set in Railway.
-2. `DATABASE_URL` points to the production Postgres service.
-3. Railway pre-deploy schema bootstrap succeeds.
+2. `DATABASE_URL` points to the production Postgres service with the non-owner app role.
+3. Schema DDL and least-privilege grants were applied out-of-band with an owner/admin credential.
 4. `/readyz` returns `ready`.
 5. Authenticated smoke checks can create/read session, usage, entitlement, consent, and protected job lookup state.
 
@@ -132,7 +133,8 @@ Authenticated smoke uses `TELEGRAM_TOKEN` from the environment to sign Telegram 
 
 Staging should be exercised before broadening the alpha cohort:
 
-- Railway: create or link a staging environment/service that uses the same `railway.json` start/predeploy/healthcheck behavior.
+- Railway: create or link a staging environment/service that uses the same `railway.json` start/healthcheck behavior.
+- Apply staging schema DDL out-of-band with a staging owner/admin credential before deploying the Railway app role.
 - Vercel: use a preview deployment or staging alias with `NEXT_PUBLIC_API_BASE_URL` pointed at the staging Railway backend.
 - Postgres: use a separate staging Postgres database or schema, never production data.
 - Telegram: use a separate staging bot token if Telegram end-to-end behavior is tested.

@@ -5,7 +5,6 @@
   },
   "deploy": {
     "startCommand": "python -m src.main",
-    "preDeployCommand": "python -c \"from src.app.settings import Settings; from src.db.bootstrap import apply_postgres_schema; s=Settings.from_env(); apply_postgres_schema(s.database_url)\"",
     "healthcheckPath": "/healthz",
     "healthcheckTimeout": 120
   }

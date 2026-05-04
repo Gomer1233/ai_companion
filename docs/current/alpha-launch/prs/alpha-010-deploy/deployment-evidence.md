@@ -1,6 +1,6 @@
 # ALPHA-010 Deployment Evidence
 
-Status: work in progress.
+Status: ready for review.
 
 Date: 2026-05-04
 
@@ -34,17 +34,18 @@ Verification:
 
 Deployment:
 
-- Deployment id: `9aee7536-5e5c-444b-adcf-4b73fa1c5ce6`
-- Deploy method: `npx @railway/cli up --detach --service ai-companion-bot --message "Deploy ALPHA-010 smokeable backend"`
+- Deployment id: `a9cb465c-42cb-452d-b0da-93f7043e3510`
+- Deploy method: `npx @railway/cli up --detach --service ai-companion-bot --message "Deploy ALPHA-010 without Railway schema DDL"`
 - Result: `SUCCESS`
-- Service status: active deployment `9aee7536-5e5c-444b-adcf-4b73fa1c5ce6`, status `SUCCESS`, stopped `false`
+- Service status: active deployment `a9cb465c-42cb-452d-b0da-93f7043e3510`, status `SUCCESS`, stopped `false`
+- Railway deployment metadata shows `preDeployCommand: null`.
 
 Runtime log notes:
 
 - Uvicorn started on `0.0.0.0:8000`.
 - Aiogram polling started for `@Lina_YourFriend_Bot`.
 - A transient Telegram `getUpdates` conflict appeared during rolling replacement, then polling reported `Connection established`.
-- `/healthz` and `/readyz` returned `200`.
+- `/healthz`, `/readyz`, session exchange, entitlement, usage, consent, and protected job lookup smoke requests reached the active deployment.
 
 Public checks:
 
