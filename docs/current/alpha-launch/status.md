@@ -23,7 +23,7 @@
 - `ALPHA-005 Monetization Core + Admin Commands` is merged to `main`.
 - `ALPHA-006 Persona Audit + Launch Allowlist Freeze` is merged to `main`.
 - `ALPHA-007 Job Reliability` is merged to `main`.
-- `ALPHA-008 Mini App Alpha` is ready for review on `codex/alpha-008-mini-app-alpha`.
+- `ALPHA-008 Mini App Alpha` is merged to `main`.
 - Post-alpha standalone Web direction is captured as an accepted identity/readiness decision: `docs/adr/0002-user-identity-and-standalone-web-readiness.md`.
 
 ## Completed
@@ -127,7 +127,7 @@
 
 ## Next Step
 
-Review and merge `ALPHA-008 Mini App Alpha`, then start `ALPHA-009 Compliance Completion + Alpha Ops`.
+Start `ALPHA-009 Compliance Completion + Alpha Ops`.
 
 ## Risks / Notes
 
