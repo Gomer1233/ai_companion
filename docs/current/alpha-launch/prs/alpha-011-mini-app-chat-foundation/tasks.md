@@ -5,6 +5,11 @@
   - `GET /api/miniapp/chats`
   - `GET /api/miniapp/chats/{character_id}/messages`
   - `POST /api/miniapp/chats/{character_id}/messages`
+- [ ] Add backend usage tests for Mini App sends:
+  - reject send when message quota is exhausted
+  - return `429 usage_limit_exceeded` for quota rejection
+  - record message usage exactly once after a successful assistant reply
+  - do not record message usage when access, consent, or quota rejects the send
 - [ ] Add repository tests proving per-persona histories are isolated by `UserRef + mode`.
 - [ ] Add or reuse repository methods for deterministic Mini App persona conversations.
 - [ ] Extract or wrap shared text-turn orchestration so HTTP Mini App sends do not duplicate Telegram provider/access/history logic.

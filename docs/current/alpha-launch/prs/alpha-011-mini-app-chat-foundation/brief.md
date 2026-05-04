@@ -69,12 +69,13 @@ Response shape:
         "role": "assistant",
         "content_preview": "Short preview text",
         "created_at": 1777890000
-      },
-      "unread_count": 0
+      }
     }
   ]
 }
 ```
+
+Unread tracking is intentionally out of scope for `ALPHA-011`: no read markers, delivery state, or last-read cursor are introduced. If the UI needs a badge in this PR, it must derive from existing loaded state and not add an `unread_count` API field.
 
 ### `GET /api/miniapp/chats/{character_id}/messages`
 
@@ -164,7 +165,7 @@ Error behavior:
 
 - `src/adapters/http/routes/api.py` or a new route module under `src/adapters/http/routes/**`
 - `src/db/repositories.py`
-- `src/db/postgres_repositories.py`
+- `src/db/postgres.py`
 - shared chat orchestration module under `src/**`
 - `apps/miniapp/src/**`
 - `apps/miniapp/tests/**`

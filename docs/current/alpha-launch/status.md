@@ -148,6 +148,7 @@
   - scope set to text-only per-persona Mini App chat foundation, not standalone Web identity and not image generation
   - proposed protected Railway API contract for chat list, per-persona history, and text send
   - frontend direction set to persona list plus active chat panel while keeping Access/Profile as secondary panels
+  - follow-up Mini App backlog split into ALPHA-012 app shell/chat UX, ALPHA-013 image jobs, and ALPHA-014 product readiness/ops polish
 
 ## Next Step
 
@@ -161,4 +162,5 @@ Implement `ALPHA-011 Mini App Chat Foundation`: add backend text chat endpoints,
 - Standalone Web with chat is a post-alpha direction. Alpha remains Telegram-first, but `ALPHA-004` through `ALPHA-010` must preserve `UserRef`-first backend contracts and avoid treating Telegram as the product identity model.
 - `ALPHA-011` intentionally changes the Mini App product surface from auxiliary guide to first-party Telegram Mini App text chat. This is not standalone Web; it must keep Telegram-linked auth/session for the alpha cohort and must not introduce direct browser-to-Supabase access.
 - Keep `ALPHA-011` text-only. Image generation inside Mini App should be planned after the text chat foundation proves history isolation, access checks, and send flow.
+- ALPHA-012 through ALPHA-014 are alpha Mini App follow-ups, not Web backlog. They should keep the same Telegram-linked identity and Railway API truth until a separate standalone Web initiative starts.
 

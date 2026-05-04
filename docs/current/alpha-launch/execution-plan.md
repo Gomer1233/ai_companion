@@ -5,12 +5,13 @@
 
 Эта инициатива является follow-on к завершённому циклу `multichannel-core` и использует его как foundation, но не переписывает его историю.
 
-## Current Repo State
+## Current Repo State After ALPHA-010
 
-- `src/main.py` всё ещё содержит остаточную orchestration и прямые `sqlite3.connect`.
-- `src/db/repositories.py` пока остаётся SQLite-only implementation.
-- HTTP adapter в `src/` отсутствует.
-- `docs/current/multichannel-core/status.md` фиксирует следующий полезный шаг: вынос orchestration из `main.py` и обнуление `legacy_runtime`.
+- Railway production hosts the Python bot runtime and FastAPI API from `src/adapters/http/**`.
+- Vercel production hosts the Telegram Mini App frontend from `apps/miniapp`.
+- Supabase Postgres is the production backend store through `src/db/postgres.py`; `src/db/repositories.py` remains the shared repository contract and SQLite implementation used by tests/local paths.
+- `src/main.py` still contains substantial Telegram orchestration and some legacy runtime helpers, so ALPHA-011 should extract only the text-turn seam needed for Mini App chat instead of attempting a full launcher rewrite.
+- The current Mini App is clickable and deployed, but it is still guide-first: persona selection does not provide separate in-app chat histories or in-app text send.
 
 ## Fixed Decisions
 
@@ -408,7 +409,7 @@ Source of truth для `GET /api/*` живёт только в Python backend se
   - onboarding;
   - 18+ consent UX.
 - Добавить `Открыть приложение` из бота.
-- Не переносить основной чат в Mini App.
+- Не переносить основной чат в Mini App. This constraint applies to `ALPHA-008` only; `ALPHA-011` deliberately supersedes it for Telegram-linked text chat after the guide-only Mini App proved insufficient.
 
 ### Правила
 
