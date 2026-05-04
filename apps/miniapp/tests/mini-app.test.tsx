@@ -87,6 +87,8 @@ describe("MiniApp", () => {
       />,
     );
 
+    expect(screen.getAllByText("TRIAL PASS")).toHaveLength(2);
+    expect(screen.queryByText("FREE PASS")).not.toBeInTheDocument();
     expect(screen.queryByText("18+ LOCKED")).not.toBeInTheDocument();
     expect(screen.getByText("18+ OPEN")).toBeInTheDocument();
   });

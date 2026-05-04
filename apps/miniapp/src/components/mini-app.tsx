@@ -11,7 +11,7 @@ export function MiniApp({ state, onAcceptExplicit }: Props) {
   const selected = state.characters.items[0];
   const messageLimit = state.usage.messages.limit;
   const messageUsed = state.usage.messages.used;
-  const passLabel = state.entitlements.has_premium ? "VIP PASS" : "FREE PASS";
+  const passLabel = planPassLabel(state.entitlements.tier);
 
   return (
     <main className="shell" id="home" data-testid="mini-app-shell">
@@ -126,4 +126,18 @@ function channelHint(category: string): string {
     explicit: "Restricted channel",
   };
   return hints[category] ?? "Persona channel";
+}
+
+function planPassLabel(tier: string): string {
+  const normalized = tier.trim().toLowerCase();
+  if (normalized === "premium" || normalized === "lifetime") {
+    return "VIP PASS";
+  }
+  if (normalized === "trial") {
+    return "TRIAL PASS";
+  }
+  if (normalized === "free") {
+    return "FREE PASS";
+  }
+  return `${normalized.toUpperCase()} PASS`;
 }
