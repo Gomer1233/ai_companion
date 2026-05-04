@@ -26,14 +26,28 @@ ANSWER_TEXT = "\u0422\u0435\u0441\u0442\u043e\u0432\u044b\u0439 \u043e\u0442\u04
 
 @pytest.mark.asyncio
 async def test_start_command_prompts_mode_selection(module_loader):
-    module = module_loader("src.main")
+    module = module_loader("src.main", env={"MINI_APP_URL": "https://mini.lina.example"})
     module.init_db()
     message = FakeMessage("/start")
 
     await module.cmd_start(message)
 
     assert message.answers
-    assert START_TEXT in message.answers[-1]["text"]
+    assert START_TEXT in message.answers[0]["text"]
+    assert message.answers[1]["reply_markup"].inline_keyboard[0][0].web_app.url == "https://mini.lina.example"
+
+
+@pytest.mark.asyncio
+async def test_mini_app_reply_button_sends_inline_open_button(module_loader):
+    module = module_loader("src.main", env={"MINI_APP_URL": "https://mini.lina.example"})
+    message = FakeMessage(module.MINI_APP_BUTTON)
+
+    await module.mini_app_btn(message)
+
+    assert message.answers
+    button = message.answers[-1]["reply_markup"].inline_keyboard[0][0]
+    assert button.text == "Open Mini App"
+    assert button.web_app.url == "https://mini.lina.example"
 
 
 @pytest.mark.asyncio

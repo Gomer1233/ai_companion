@@ -70,9 +70,12 @@ def test_main_menu_exposes_mini_app_button_when_url_is_configured(module_loader)
     module = module_loader("src.main", env={"MINI_APP_URL": "https://mini.lina.example"})
 
     button = module.MAIN_MENU.keyboard[-1][0]
+    inline_button = module.build_mini_app_inline_keyboard().inline_keyboard[0][0]
 
     assert button.text == module.MINI_APP_BUTTON
-    assert button.web_app.url == "https://mini.lina.example"
+    assert button.web_app is None
+    assert inline_button.text == "Open Mini App"
+    assert inline_button.web_app.url == "https://mini.lina.example"
 
 
 @pytest.mark.asyncio
