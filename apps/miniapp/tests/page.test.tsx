@@ -77,4 +77,22 @@ describe("Mini App page", () => {
     expect(screen.queryByText("18+ LOCKED")).not.toBeInTheDocument();
     expect(screen.getAllByText("18+ OPEN").length).toBeGreaterThan(0);
   });
+
+  it("waits for Telegram initData before declaring the session unavailable", async () => {
+    window.Telegram = { WebApp: { initData: "", ready: vi.fn(), expand: vi.fn() } };
+    loadMiniAppState.mockResolvedValueOnce(initialState);
+    const { default: Page } = await import("../src/app/page");
+
+    render(<Page />);
+    expect(screen.getByText("Tuning channel guide...")).toBeInTheDocument();
+
+    window.setTimeout(() => {
+      window.Telegram!.WebApp!.initData = "late-tg-init-data";
+    }, 25);
+
+    await waitFor(() =>
+      expect(loadMiniAppState).toHaveBeenCalledWith(expect.objectContaining({ initData: "late-tg-init-data" })),
+    );
+    expect(await screen.findByText("18+ LOCKED")).toBeInTheDocument();
+  });
 });

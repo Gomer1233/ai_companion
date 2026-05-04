@@ -18,6 +18,8 @@ declare global {
 }
 
 const apiBaseUrl = process.env.NEXT_PUBLIC_API_BASE_URL ?? "";
+const telegramInitDataWaitMs = 5000;
+const telegramInitDataPollMs = 100;
 
 export default function Page() {
   const [state, setState] = useState<MiniAppState | null>(null);
@@ -25,16 +27,33 @@ export default function Page() {
   const tokenStore = useMemo(() => createBrowserTokenStore(), []);
 
   useEffect(() => {
-    window.Telegram?.WebApp?.ready?.();
-    window.Telegram?.WebApp?.expand?.();
-    const initData = window.Telegram?.WebApp?.initData ?? "";
-    if (!apiBaseUrl || !initData) {
-      setError("Mini App session is unavailable.");
-      return;
-    }
-    loadMiniAppState({ apiBaseUrl, initData, tokenStore })
-      .then(setState)
-      .catch(() => setError("Could not load Lina channel guide."));
+    let cancelled = false;
+    waitForTelegramInitData()
+      .then((initData) => {
+        if (cancelled) {
+          return;
+        }
+        window.Telegram?.WebApp?.ready?.();
+        window.Telegram?.WebApp?.expand?.();
+        if (!apiBaseUrl || !initData) {
+          setError(buildSessionUnavailableMessage(initData));
+          return;
+        }
+        loadMiniAppState({ apiBaseUrl, initData, tokenStore })
+          .then((nextState) => {
+            if (!cancelled) {
+              setState(nextState);
+            }
+          })
+          .catch(() => {
+            if (!cancelled) {
+              setError("Could not load Lina channel guide.");
+            }
+          });
+      });
+    return () => {
+      cancelled = true;
+    };
   }, [tokenStore]);
 
   async function handleAcceptExplicit() {
@@ -62,4 +81,26 @@ export default function Page() {
   }
 
   return <MiniApp state={state} onAcceptExplicit={handleAcceptExplicit} />;
+}
+
+async function waitForTelegramInitData(): Promise<string> {
+  const startedAt = Date.now();
+  while (Date.now() - startedAt < telegramInitDataWaitMs) {
+    const initData = window.Telegram?.WebApp?.initData ?? "";
+    if (initData) {
+      return initData;
+    }
+    await new Promise((resolve) => window.setTimeout(resolve, telegramInitDataPollMs));
+  }
+  return window.Telegram?.WebApp?.initData ?? "";
+}
+
+function buildSessionUnavailableMessage(initData: string): string {
+  const status = [
+    `api:${apiBaseUrl ? "set" : "missing"}`,
+    `tg:${window.Telegram ? "set" : "missing"}`,
+    `webapp:${window.Telegram?.WebApp ? "set" : "missing"}`,
+    `init:${initData.length}`,
+  ].join(" ");
+  return `Mini App session is unavailable. ${status}`;
 }
