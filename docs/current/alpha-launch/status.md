@@ -24,7 +24,8 @@
 - `ALPHA-006 Persona Audit + Launch Allowlist Freeze` is merged to `main`.
 - `ALPHA-007 Job Reliability` is merged to `main`.
 - `ALPHA-008 Mini App Alpha` is merged to `main`.
-- `ALPHA-009 Compliance Completion + Alpha Ops` is ready for review on `codex/alpha-009-compliance-ops`.
+- `ALPHA-009 Compliance Completion + Alpha Ops` is merged to `main`.
+- `ALPHA-010 Deploy to Railway + Vercel + Supabase` has started.
 - Post-alpha standalone Web direction is captured as an accepted identity/readiness decision: `docs/adr/0002-user-identity-and-standalone-web-readiness.md`.
 
 ## Completed
@@ -136,7 +137,7 @@
 
 ## Next Step
 
-Review and merge `ALPHA-009 Compliance Completion + Alpha Ops`, then start `ALPHA-010 Deploy to Railway + Vercel + Supabase`.
+Complete `ALPHA-010 Deploy to Railway + Vercel + Supabase`.
 
 ## Risks / Notes
 
