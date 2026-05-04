@@ -3,8 +3,8 @@
 ## Initiative
 
 - Name: `alpha-launch`
-- Current date baseline: `2026-04-06`
-- State: `Done`
+- Current date baseline: `2026-05-04`
+- State: `In Progress`
 - Depends on: completed `multichannel-core` foundation plus follow-on launcher consolidation
 
 ## Current Source of Truth
@@ -26,6 +26,7 @@
 - `ALPHA-008 Mini App Alpha` is merged to `main`.
 - `ALPHA-009 Compliance Completion + Alpha Ops` is merged to `main`.
 - `ALPHA-010 Deploy to Railway + Vercel + Supabase` is merged to `main`.
+- `ALPHA-011 Mini App Chat Foundation` is in progress as a post-deploy product correction for the Telegram Mini App.
 - Post-alpha standalone Web direction is captured as an accepted identity/readiness decision: `docs/adr/0002-user-identity-and-standalone-web-readiness.md`.
 
 ## Completed
@@ -141,10 +142,16 @@
   - deploy, staging, rollback, and incident runbooks
   - public and authenticated production smoke checks against Railway and Vercel
   - Railway deploy config without schema DDL in deploy/startup, preserving the ALPHA-003 non-owner runtime `DATABASE_URL` contract
+- `ALPHA-011` has started with:
+  - `ALPHA-010` marked `Done` and `ALPHA-011` marked `In Progress`
+  - Mini App product gap documented: `ALPHA-008` made the interface clickable, but still did not solve the user problem that persona conversations are mixed in one Telegram chat
+  - scope set to text-only per-persona Mini App chat foundation, not standalone Web identity and not image generation
+  - proposed protected Railway API contract for chat list, per-persona history, and text send
+  - frontend direction set to persona list plus active chat panel while keeping Access/Profile as secondary panels
 
 ## Next Step
 
-Alpha launch is complete. Next planning step is a separate post-alpha Web initiative starting with `WEB-001 Standalone Web Identity`, or operational alpha monitoring using the ALPHA-010 smoke/runbook package.
+Implement `ALPHA-011 Mini App Chat Foundation`: add backend text chat endpoints, shared text-turn orchestration, per-persona history isolation, and a Mini App chat UI that can send/receive text without returning to Telegram.
 
 ## Risks / Notes
 
@@ -152,4 +159,6 @@ Alpha launch is complete. Next planning step is a separate post-alpha Web initia
 - Explicit launch scope is intentionally conservative on capability surface, but persona scope remains subject to audit freeze.
 - Security baseline assumes no direct browser path to Supabase in alpha v1.
 - Standalone Web with chat is a post-alpha direction. Alpha remains Telegram-first, but `ALPHA-004` through `ALPHA-010` must preserve `UserRef`-first backend contracts and avoid treating Telegram as the product identity model.
+- `ALPHA-011` intentionally changes the Mini App product surface from auxiliary guide to first-party Telegram Mini App text chat. This is not standalone Web; it must keep Telegram-linked auth/session for the alpha cohort and must not introduce direct browser-to-Supabase access.
+- Keep `ALPHA-011` text-only. Image generation inside Mini App should be planned after the text chat foundation proves history isolation, access checks, and send flow.
 

@@ -15,7 +15,8 @@
 ## Fixed Decisions
 
 - Один backend truth, один Telegram bot launcher, один access-policy слой.
-- Бот остаётся `bot-first`; Mini App не забирает основной чат в alpha v1.
+- `ALPHA-008` shipped the Mini App as an auxiliary channel guide, not as the primary chat surface.
+- `ALPHA-011` changes the Mini App product contract: the Mini App becomes a first-party per-persona text chat client for the Telegram-linked alpha cohort, while the Telegram bot remains entry point, fallback, payments/support surface, and compatibility path.
 - User-facing web surfaces use the `Lina Midnight Channel UI` visual contract from `docs/adr/0001-lina-midnight-channel-ui.md`; Mini App is the first implementation, and future standalone Web should extend the same direction.
 - User identity follows `docs/adr/0002-user-identity-and-standalone-web-readiness.md`: `UserRef` is the primary product identity; Telegram accounts are linked identities, not the product user model.
 - Railway хостит Python backend service: bot runtime + HTTP API.
@@ -442,6 +443,62 @@ Compliance начинается во время Track 4-8, а этот шаг я
 - Consent model есть как backend behavior.
 - Есть support/abuse/remove-account process.
 
+## 10. Deploy to Railway + Vercel + Supabase
+
+Deploy the bot, backend API, Mini App, and database-backed alpha stack with repeatable smoke checks.
+
+### Сделать
+
+- Railway production deploy for bot runtime and FastAPI API.
+- Vercel production deploy for the Mini App frontend.
+- Supabase production connection and least-privilege runtime configuration.
+- Launch smoke CLI for public and authenticated checks.
+- Deployment, rollback, staging, and incident runbooks.
+
+### Acceptance Criteria
+
+- Production Railway backend passes `healthz` and `readyz`.
+- Production Vercel Mini App reaches the configured Railway API.
+- Authenticated smoke can exercise Telegram-linked Mini App session exchange.
+- Runtime deploy path preserves the non-owner `DATABASE_URL` contract from `ALPHA-003`.
+
+## 11. Mini App Chat Foundation
+
+Turn the Mini App from a channel guide into a useful chat surface by giving each launch persona its own Mini App conversation and message history.
+
+### Product Contract
+
+- Each catalog persona opens an isolated chat thread in the Mini App.
+- Message history is separated by `UserRef + persona/mode`, so different personas no longer mix in one Telegram chat transcript.
+- Sending a text message from the Mini App uses the same backend access, consent, usage, persona, and provider policy as Telegram.
+- Locked premium or explicit personas remain visible but block send with backend-owned reasons and the existing consent/upgrade path.
+- Telegram remains an entry/fallback surface; Mini App chat does not require the user to re-select the same persona in the bot after choosing it in the Mini App.
+
+### Сделать
+
+- Add protected Railway API endpoints for Mini App chat list, per-persona message history, and text message send.
+- Reuse existing repository conversation/message storage where possible; add only the minimum metadata needed to identify Mini App per-persona threads.
+- Extract or wrap Telegram text-turn orchestration so HTTP Mini App sends and Telegram sends share provider routing, history append, usage accounting, and access policy checks.
+- Update the Next.js Mini App from guide-only panels into a channel list plus active chat panel.
+- Preserve the `Lina Midnight Channel UI` visual direction while making the primary action a real in-app send flow.
+- Keep browser code as a thin client over Railway; no direct Supabase access and no frontend-owned entitlement decisions.
+
+### Out of Scope
+
+- Standalone Web identity, email/password login, or non-Telegram account linking.
+- Image generation inside Mini App chat.
+- Realtime streaming or WebSocket transport.
+- New payment providers or billing redesign.
+- New personas or provider matrix changes.
+
+### Acceptance Criteria
+
+- A user can open Mini App, choose a persona, send a text message, and read the assistant response without returning to Telegram.
+- Switching personas shows a different history for each persona.
+- Premium/explicit locked personas cannot send messages unless backend access allows it.
+- Existing Telegram bot chat still works after the Mini App chat API is added.
+- Mini App chat tests prove no direct browser-to-Supabase path and no frontend-owned entitlement logic.
+
 ## Delivery Sequence
 
 Исполнять как отдельные инициативы/PR chains:
@@ -456,10 +513,11 @@ Compliance начинается во время Track 4-8, а этот шаг я
 8. `Mini App Alpha`
 9. `Compliance Completion + Alpha Ops`
 10. `Deploy to Railway + Vercel + Supabase`
+11. `Mini App Chat Foundation`
 
 ## Post-Alpha Web Direction
 
-Не включать standalone Web в alpha launch scope, но сохранить путь к нему:
+Не включать standalone Web identity в alpha launch scope, но сохранить путь к нему после Mini App chat foundation:
 
 1. `WEB-001 Standalone Web Identity`
 2. `WEB-002 Standalone Web Shell`
