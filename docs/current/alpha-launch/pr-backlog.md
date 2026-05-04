@@ -10,7 +10,7 @@
 | ALPHA-006 | Persona Audit + Launch Allowlist Freeze | ALPHA-005 | Done | `prs/alpha-006-persona-audit/brief.md` |
 | ALPHA-007 | Job Reliability | ALPHA-005 | Done | `prs/alpha-007-job-reliability/brief.md` |
 | ALPHA-008 | Mini App Alpha | ALPHA-006, ALPHA-007 | Done | `prs/alpha-008-mini-app-alpha/brief.md` |
-| ALPHA-009 | Compliance Completion + Alpha Ops | ALPHA-006 | Planned | `prs/alpha-009-compliance-ops/brief.md` |
+| ALPHA-009 | Compliance Completion + Alpha Ops | ALPHA-006 | Ready | `prs/alpha-009-compliance-ops/brief.md` |
 | ALPHA-010 | Deploy to Railway + Vercel + Supabase | ALPHA-008, ALPHA-009 | Planned | `prs/alpha-010-deploy/brief.md` |
 
 ## Post-Alpha Web Backlog

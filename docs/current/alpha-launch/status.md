@@ -24,6 +24,7 @@
 - `ALPHA-006 Persona Audit + Launch Allowlist Freeze` is merged to `main`.
 - `ALPHA-007 Job Reliability` is merged to `main`.
 - `ALPHA-008 Mini App Alpha` is merged to `main`.
+- `ALPHA-009 Compliance Completion + Alpha Ops` is ready for review on `codex/alpha-009-compliance-ops`.
 - Post-alpha standalone Web direction is captured as an accepted identity/readiness decision: `docs/adr/0002-user-identity-and-standalone-web-readiness.md`.
 
 ## Completed
@@ -124,10 +125,16 @@
   - Telegram bot `Mini App` keyboard entry point when `MINI_APP_URL` is configured
   - full local verification passed: `python -m pytest -q`, `python -m ruff check .`, `python -m mypy`, `npm test`, `npm run typecheck`, and `npm run build`
   - mobile Playwright visual check passed against mocked Railway API responses
+- `ALPHA-009` now adds:
+  - closed-alpha privacy policy and terms drafts
+  - explicit 18+ consent and safety copy contract
+  - support, export, deletion/account-removal, abuse, logging, secrets, backup, and restore runbook
+  - closed alpha cohort and support process
+  - documented implementation gaps for per-user export and full account deletion
 
 ## Next Step
 
-Start `ALPHA-009 Compliance Completion + Alpha Ops`.
+Review and merge `ALPHA-009 Compliance Completion + Alpha Ops`, then start `ALPHA-010 Deploy to Railway + Vercel + Supabase`.
 
 ## Risks / Notes
 
