@@ -69,8 +69,9 @@ describe("Mini App page", () => {
     const { default: Page } = await import("../src/app/page");
 
     render(<Page />);
-    expect(await screen.findByText("18+ LOCKED")).toBeInTheDocument();
+    expect((await screen.findAllByText("18+ LOCKED")).length).toBeGreaterThan(0);
 
+    fireEvent.click(screen.getByRole("button", { name: "Access" }));
     fireEvent.click(screen.getByRole("button", { name: "I am 18+ and accept" }));
 
     await waitFor(() => expect(loadMiniAppState).toHaveBeenCalledTimes(2));
@@ -93,6 +94,6 @@ describe("Mini App page", () => {
     await waitFor(() =>
       expect(loadMiniAppState).toHaveBeenCalledWith(expect.objectContaining({ initData: "late-tg-init-data" })),
     );
-    expect(await screen.findByText("18+ LOCKED")).toBeInTheDocument();
+    expect((await screen.findAllByText("18+ LOCKED")).length).toBeGreaterThan(0);
   });
 });

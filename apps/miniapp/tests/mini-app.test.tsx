@@ -97,6 +97,7 @@ describe("MiniApp", () => {
     const onAcceptExplicit = vi.fn();
 
     render(<MiniApp state={state} onAcceptExplicit={onAcceptExplicit} />);
+    fireEvent.click(screen.getByRole("button", { name: "Access" }));
     expect(screen.getByText("18+ explicit access")).toBeInTheDocument();
     expect(
       screen.getByText(
@@ -106,5 +107,60 @@ describe("MiniApp", () => {
     fireEvent.click(screen.getByRole("button", { name: "I am 18+ and accept" }));
 
     expect(onAcceptExplicit).toHaveBeenCalledOnce();
+  });
+
+  it("lets the user select a channel and tune back in Telegram", () => {
+    render(<MiniApp state={state} onAcceptExplicit={vi.fn()} />);
+
+    fireEvent.click(screen.getByRole("button", { name: /CH 002 Coach/ }));
+
+    expect(screen.getByTestId("selected-channel-title")).toHaveTextContent("Coach");
+    expect(screen.getByTestId("selected-channel-number")).toHaveTextContent("CH 002");
+
+    fireEvent.click(screen.getByRole("button", { name: "Tune In" }));
+
+    expect(screen.getByRole("status")).toHaveTextContent("Coach is Premium locked");
+    expect(screen.getByRole("tabpanel", { name: "Access" })).toBeInTheDocument();
+  });
+
+  it("turns an open channel tune action into a Telegram chat instruction", () => {
+    render(<MiniApp state={state} onAcceptExplicit={vi.fn()} />);
+
+    fireEvent.click(screen.getByRole("button", { name: "Tune In" }));
+
+    expect(screen.getByRole("status")).toHaveTextContent("AI Assistant is ready");
+    expect(screen.getByRole("button", { name: "Return to Telegram" })).toBeInTheDocument();
+    expect(screen.getByText(/choose AI Assistant in/)).toBeInTheDocument();
+  });
+
+  it("switches bottom panels instead of using inert links", () => {
+    render(<MiniApp state={state} onAcceptExplicit={vi.fn()} />);
+
+    fireEvent.click(screen.getByRole("button", { name: "Profile" }));
+
+    expect(screen.getByRole("button", { name: "Profile" })).toHaveAttribute("aria-selected", "true");
+    expect(screen.getByRole("tabpanel", { name: "Profile" })).toHaveTextContent("User 42");
+    expect(screen.getByText("/support miniapp")).toBeInTheDocument();
+  });
+
+  it("makes Home a distinct active destination", () => {
+    render(<MiniApp state={state} onAcceptExplicit={vi.fn()} />);
+
+    fireEvent.click(screen.getByRole("button", { name: "Profile" }));
+    fireEvent.click(screen.getByRole("button", { name: "Home" }));
+
+    expect(screen.getByRole("button", { name: "Home" })).toHaveAttribute("aria-selected", "true");
+    expect(screen.getByRole("button", { name: "Chats" })).toHaveAttribute("aria-selected", "false");
+    expect(screen.getByRole("tabpanel", { name: "Home" })).toHaveTextContent("Now airing");
+  });
+
+  it("sends explicit locked selections to the consent contract", () => {
+    render(<MiniApp state={state} onAcceptExplicit={vi.fn()} />);
+
+    fireEvent.click(screen.getByRole("button", { name: /CH 003 Flirt 18\+/ }));
+    fireEvent.click(screen.getByRole("button", { name: "Tune In" }));
+
+    expect(screen.getByRole("status")).toHaveTextContent("18+ consent is required");
+    expect(screen.getByText("18+ explicit access")).toBeInTheDocument();
   });
 });
