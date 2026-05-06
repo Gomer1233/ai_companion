@@ -26,7 +26,8 @@
 - `ALPHA-008 Mini App Alpha` is merged to `main`.
 - `ALPHA-009 Compliance Completion + Alpha Ops` is merged to `main`.
 - `ALPHA-010 Deploy to Railway + Vercel + Supabase` is merged to `main`.
-- `ALPHA-011 Mini App Chat Foundation` is ready for review as a post-deploy product correction for the Telegram Mini App.
+- `ALPHA-011 Mini App Chat Foundation` is merged to `main`.
+- `ALPHA-012 Mini App App Shell + Chat UX` is ready for review.
 - Post-alpha standalone Web direction is captured as an accepted identity/readiness decision: `docs/adr/0002-user-identity-and-standalone-web-readiness.md`.
 
 ## Completed
@@ -157,10 +158,17 @@
   - Next.js API client support for chat list/history/send
   - Mini App chat-first surface with persona list, active message log, composer, locked states, usage-limit error state, and Access/Profile as secondary panels
   - local verification passed: `python -m pytest -q`, `python -m ruff check .`, `python -m mypy`, `npm test -- --run`, `npm run typecheck`, and `npm run build`
+- `ALPHA-012` now adds:
+  - Chats as the primary Mini App destination instead of a guide/home shell
+  - Support as a secondary Mini App section alongside Access and Profile
+  - selected-thread loading, load-error, retry, locked, and usage-limit states
+  - thread refresh action using the existing per-persona history endpoint
+  - page-level loading/error propagation for chat history fetches
+  - local verification passed: `npm test -- --run`, `npm run typecheck`, and `npm run build`
 
 ## Next Step
 
-Review and merge `ALPHA-011 Mini App Chat Foundation`, then start `ALPHA-012 Mini App App Shell + Chat UX` after merge/status reconciliation.
+Review and merge `ALPHA-012 Mini App App Shell + Chat UX`, then start `ALPHA-013 Mini App Image Jobs`.
 
 ## Risks / Notes
 

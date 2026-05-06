@@ -176,6 +176,13 @@ button {
   gap: 8px;
 }
 
+.chat-actions {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 6px;
+}
+
 .signal {
   border: 1px solid var(--line);
   border-radius: 4px;
@@ -237,6 +244,28 @@ button {
   border: 1px solid rgba(88, 195, 199, 0.48);
   background: rgba(88, 195, 199, 0.14);
   color: var(--paper);
+}
+
+.micro-command {
+  min-height: 26px;
+  border: 1px solid rgba(88, 195, 199, 0.38);
+  border-radius: 4px;
+  padding: 0 8px;
+  background: rgba(88, 195, 199, 0.12);
+  color: var(--paper);
+  font-size: 11px;
+  font-weight: 900;
+}
+
+.micro-command:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+.compact-command {
+  width: auto;
+  min-height: 34px;
+  padding: 0 12px;
 }
 
 .tune-status {
@@ -394,6 +423,7 @@ button {
 .bottom-nav button:focus-visible,
 .primary-command:focus-visible,
 .secondary-command:focus-visible,
+.micro-command:focus-visible,
 .danger-command:focus-visible {
   outline: 2px solid var(--amber);
   outline-offset: 2px;
