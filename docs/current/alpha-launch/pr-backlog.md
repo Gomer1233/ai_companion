@@ -12,7 +12,7 @@
 | ALPHA-008 | Mini App Alpha | ALPHA-006, ALPHA-007 | Done | `prs/alpha-008-mini-app-alpha/brief.md` |
 | ALPHA-009 | Compliance Completion + Alpha Ops | ALPHA-006 | Done | `prs/alpha-009-compliance-ops/brief.md` |
 | ALPHA-010 | Deploy to Railway + Vercel + Supabase | ALPHA-008, ALPHA-009 | Done | `prs/alpha-010-deploy/brief.md` |
-| ALPHA-011 | Mini App Chat Foundation | ALPHA-010 | In Progress | `prs/alpha-011-mini-app-chat-foundation/brief.md` |
+| ALPHA-011 | Mini App Chat Foundation | ALPHA-010 | Ready | `prs/alpha-011-mini-app-chat-foundation/brief.md` |
 | ALPHA-012 | Mini App App Shell + Chat UX | ALPHA-011 | Planned | `prs/alpha-012-mini-app-shell-chat-ux/brief.md` |
 | ALPHA-013 | Mini App Image Jobs | ALPHA-012 | Planned | `prs/alpha-013-mini-app-image-jobs/brief.md` |
 | ALPHA-014 | Alpha Product Readiness + Ops Polish | ALPHA-013 | Planned | `prs/alpha-014-product-readiness-ops-polish/brief.md` |
@@ -23,7 +23,7 @@ These are still alpha Mini App items, not standalone Web work. Identity remains 
 
 | PR | Title | Depends On | Status | Scope |
 | --- | --- | --- | --- | --- |
-| ALPHA-011 | Mini App Chat Foundation | ALPHA-010 | In Progress | Text-only per-persona chats, backend send flow, history isolation, access/usage/consent checks. |
+| ALPHA-011 | Mini App Chat Foundation | ALPHA-010 | Ready | Text-only per-persona chats, backend send flow, history isolation, access/usage/consent checks. |
 | ALPHA-012 | Mini App App Shell + Chat UX | ALPHA-011 | Planned | Chat-first layout, navigation, empty/loading/error states, locked states, reset thread, profile/access/support as secondary screens. |
 | ALPHA-013 | Mini App Image Jobs | ALPHA-012 | Planned | Image generation through existing job lifecycle: start job, poll status, display result, cancel/retry, owner checks. |
 | ALPHA-014 | Alpha Product Readiness + Ops Polish | ALPHA-013 | Planned | Smoke/e2e, UX copy, support/account flows, telemetry/logging gaps, launch checklist. |

@@ -5,6 +5,7 @@ import time
 from fastapi import APIRouter, HTTPException, Request, status
 
 from src.adapters.http.dependencies import require_session
+from src.core.chat_service import MiniAppChatError, MiniAppChatService, build_default_chat_responder
 from src.config.persona_audit import build_alpha_launch_catalog
 from src.core.monetization import MonetizationService, Tier
 
@@ -100,6 +101,61 @@ def usage(request: Request) -> dict[str, object]:
     }
 
 
+@router.get("/miniapp/chats")
+def miniapp_chats(request: Request) -> dict[str, list[dict[str, object]]]:
+    session = require_session(request)
+    dependencies = request.app.state.dependencies
+    service = MonetizationService(dependencies.repositories)
+    chat_service = _miniapp_chat_service(request)
+    now_ts = int(time.time())
+    return {
+        "items": [
+            {
+                "id": item.id,
+                "mode": item.mode,
+                "title": item.title,
+                "category": item.category,
+                "default_tier": item.default_tier,
+                "access": {
+                    "allowed": (decision := service.can_use_persona(session.user_ref, item.mode, now_ts)).allowed,
+                    "reasons": list(decision.reasons),
+                },
+                "last_message": chat_service.last_message(session.user_ref, item.mode),
+                "unread_count": 0,
+            }
+            for item in build_alpha_launch_catalog()
+        ],
+    }
+
+
+@router.get("/miniapp/chats/{character_id}/messages")
+def miniapp_chat_messages(character_id: str, request: Request) -> dict[str, list[dict[str, object]]]:
+    session = require_session(request)
+    item = _catalog_item_or_404(character_id)
+    messages = _miniapp_chat_service(request).list_messages(session.user_ref, item.mode)
+    return {"items": messages}
+
+
+@router.post("/miniapp/chats/{character_id}/messages")
+async def miniapp_send_message(character_id: str, request: Request, payload: dict[str, str]) -> dict[str, object]:
+    session = require_session(request)
+    item = _catalog_item_or_404(character_id)
+    try:
+        return await _miniapp_chat_service(request).send_message(
+            user_ref=session.user_ref,
+            mode=item.mode,
+            text=payload.get("text", ""),
+        )
+    except MiniAppChatError as exc:
+        if exc.code == "empty_message":
+            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=exc.code) from exc
+        if exc.code == "persona_locked":
+            raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail=exc.code) from exc
+        if exc.code == "usage_limit_exceeded":
+            raise HTTPException(status_code=status.HTTP_429_TOO_MANY_REQUESTS, detail=exc.code) from exc
+        raise HTTPException(status_code=status.HTTP_502_BAD_GATEWAY, detail=exc.code) from exc
+
+
 @router.get("/jobs/{job_id}")
 def job_detail(job_id: str, request: Request) -> dict[str, str | int | None]:
     session = require_session(request)
@@ -121,3 +177,20 @@ def job_detail(job_id: str, request: Request) -> dict[str, str | int | None]:
         "error_code": job.error_code,
         "result_ref": job.result_ref,
     }
+
+
+def _catalog_item_or_404(character_id: str):
+    for item in build_alpha_launch_catalog():
+        if item.id == character_id:
+            return item
+    raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="character_not_found")
+
+
+def _miniapp_chat_service(request: Request) -> MiniAppChatService:
+    dependencies = request.app.state.dependencies
+    responder = dependencies.chat_responder or build_default_chat_responder(dependencies.settings)
+    return MiniAppChatService(
+        repositories=dependencies.repositories,
+        monetization=MonetizationService(dependencies.repositories),
+        responder=responder,
+    )

@@ -1,60 +1,65 @@
 "use client";
 
 import { useMemo, useState } from "react";
+import type { FormEvent } from "react";
 
-import type { CharacterItem, MiniAppState } from "../lib/api";
+import type { ChatMessage, ChatSummary, CharacterItem, MiniAppState } from "../lib/api";
 
 type Props = {
   state: MiniAppState;
+  messagesByChat: Record<string, ChatMessage[]>;
   onAcceptExplicit: () => void | Promise<void>;
+  onSelectChat?: (characterId: string) => void | Promise<void>;
+  onSendMessage: (characterId: string, text: string) => void | Promise<void>;
 };
 
 type Panel = "home" | "guide" | "access" | "profile";
 
-export function MiniApp({ state, onAcceptExplicit }: Props) {
-  const [selectedId, setSelectedId] = useState<string | null>(state.characters.items[0]?.id ?? null);
+export function MiniApp({ state, messagesByChat, onAcceptExplicit, onSelectChat, onSendMessage }: Props) {
+  const chats = state.chats.items.length > 0 ? state.chats.items : state.characters.items.map(characterToChatSummary);
+  const [selectedId, setSelectedId] = useState<string | null>(chats[0]?.id ?? null);
   const [activePanel, setActivePanel] = useState<Panel>("guide");
-  const [tuneMessage, setTuneMessage] = useState<string>("");
+  const [draft, setDraft] = useState<string>("");
+  const [isSending, setIsSending] = useState<boolean>(false);
+  const [sendError, setSendError] = useState<string>("");
   const selected = useMemo(
-    () => state.characters.items.find((item) => item.id === selectedId) ?? state.characters.items[0],
-    [selectedId, state.characters.items],
+    () => chats.find((item) => item.id === selectedId) ?? chats[0],
+    [selectedId, chats],
   );
-  const selectedIndex = selected ? state.characters.items.findIndex((item) => item.id === selected.id) : -1;
+  const selectedIndex = selected ? chats.findIndex((item) => item.id === selected.id) : -1;
   const selectedChannel = channelNumber(selectedIndex);
   const messageLimit = state.usage.messages.limit;
   const messageUsed = state.usage.messages.used;
   const passLabel = planPassLabel(state.entitlements.tier);
   const selectedAccess = selected ? accessLabel(selected) : "NO SIGNAL";
+  const selectedMessages = selected ? messagesByChat[selected.id] ?? [] : [];
+  const composerDisabled = !selected?.access.allowed;
+  const lockText = selected && !selected.access.allowed ? lockedReason(selected) : "";
 
-  function handleSelect(item: CharacterItem) {
+  function handleSelect(item: ChatSummary) {
     setSelectedId(item.id);
-    setTuneMessage("");
     setActivePanel("guide");
+    setDraft("");
+    setSendError("");
+    void onSelectChat?.(item.id);
   }
 
-  function handleTune() {
-    if (!selected) {
-      setTuneMessage("Choose a channel first.");
+  async function handleSubmit(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    const text = draft.trim();
+    if (!selected || !text || composerDisabled) {
       return;
     }
-
-    if (selected.category === "explicit" && selected.access.reasons.includes("explicit_consent_required")) {
-      setTuneMessage("18+ consent is required before this channel can be tuned.");
-      setActivePanel("access");
-      return;
+    setIsSending(true);
+    setSendError("");
+    try {
+      await onSendMessage(selected.id, text);
+      setDraft("");
+    } catch (error) {
+      setSendError(formatSendError(error));
+    } finally {
+      setIsSending(false);
     }
-
-    if (!selected.access.allowed) {
-      setTuneMessage(`${selected.title} is ${lockedReason(selected)}.`);
-      setActivePanel("access");
-      return;
-    }
-
-    setTuneMessage(`${selected.title} is ready. Return to Telegram and choose ${selected.title} in Mode.`);
-  }
-
-  function returnToTelegram() {
-    window.Telegram?.WebApp?.close?.();
   }
 
   return (
@@ -99,37 +104,6 @@ export function MiniApp({ state, onAcceptExplicit }: Props) {
         </div>
       </section>
 
-      <section className={`preview ${selected?.access.allowed ? "" : "scrambled"}`} aria-label="Selected channel">
-        <div className="preview-screen">
-          <div className="preview-topline">
-            <span className="tracking" data-testid="selected-channel-number">
-              {selectedChannel}
-            </span>
-            <span className={`signal ${selected?.access.allowed ? "on-air" : "locked"}`}>{selectedAccess}</span>
-          </div>
-          <h2 data-testid="selected-channel-title">{selected?.title ?? "Channel Guide"}</h2>
-          <p>{selected ? channelHint(selected.category) : "Choose a persona channel to tune the Telegram chat."}</p>
-          {selected ? (
-            <p className="mode-line">
-              Mode signal <strong>{selected.mode}</strong>
-            </p>
-          ) : null}
-        </div>
-        <button className="primary-command" type="button" onClick={handleTune}>
-          Tune In
-        </button>
-        {tuneMessage ? (
-          <div className="tune-status" role="status">
-            <p>{tuneMessage}</p>
-            {selected?.access.allowed ? (
-              <button className="secondary-command" type="button" onClick={returnToTelegram}>
-                Return to Telegram
-              </button>
-            ) : null}
-          </div>
-        ) : null}
-      </section>
-
       {activePanel === "home" ? (
         <section className="panel-stack" role="tabpanel" aria-label="Home">
           <article className="info-panel">
@@ -142,41 +116,81 @@ export function MiniApp({ state, onAcceptExplicit }: Props) {
       ) : null}
 
       {activePanel === "guide" ? (
-        <section className="guide" id="channels" role="tabpanel" aria-label="Guide">
-          {state.characters.items.map((item, index) => {
-            const number = channelNumber(index);
-            const isSelected = item.id === selected?.id;
-            return (
-              <button
-                aria-label={`${number} ${item.title}`}
-                aria-pressed={isSelected}
-                className={`channel-row ${item.category === "explicit" ? "restricted" : ""} ${isSelected ? "selected" : ""}`}
-                key={item.id}
-                type="button"
-                onClick={() => handleSelect(item)}
-              >
-                <span className="channel-number">{number}</span>
-                <span className="channel-thumb" aria-hidden="true">
-                  {channelInitial(item.title)}
-                </span>
-                <span className="channel-copy">
-                  <span className="channel-title">{item.title}</span>
-                  <span className="channel-description">{channelHint(item.category)}</span>
-                </span>
-                <span className="badges">
-                  {item.default_tier === "premium" ? (
-                    <span className="badge vip">VIP</span>
-                  ) : (
-                    <span className="badge">FREE</span>
-                  )}
-                  {!item.access.allowed ? <span className="badge">LOCKED</span> : null}
-                  {item.category === "explicit" ? (
-                    <span className="badge danger">{item.access.allowed ? "18+ OPEN" : "18+ LOCKED"}</span>
-                  ) : null}
-                </span>
+        <section className="chat-layout" id="channels" role="tabpanel" aria-label="Guide">
+          <div className="guide" aria-label="Chats">
+            {chats.map((item, index) => {
+              const number = channelNumber(index);
+              const isSelected = item.id === selected?.id;
+              return (
+                <button
+                  aria-label={`${number} ${item.title}`}
+                  aria-pressed={isSelected}
+                  className={`channel-row ${item.category === "explicit" ? "restricted" : ""} ${isSelected ? "selected" : ""}`}
+                  key={item.id}
+                  type="button"
+                  onClick={() => handleSelect(item)}
+                >
+                  <span className="channel-number">{number}</span>
+                  <span className="channel-thumb" aria-hidden="true">
+                    {channelInitial(item.title)}
+                  </span>
+                  <span className="channel-copy">
+                    <span className="channel-title">{item.title}</span>
+                    <span className="channel-description">{item.last_message?.content ?? channelHint(item.category)}</span>
+                  </span>
+                  <span className="badges">
+                    {item.default_tier === "premium" ? (
+                      <span className="badge vip">VIP</span>
+                    ) : (
+                      <span className="badge">FREE</span>
+                    )}
+                    {!item.access.allowed ? <span className="badge">LOCKED</span> : null}
+                    {item.category === "explicit" ? (
+                      <span className="badge danger">{item.access.allowed ? "18+ OPEN" : "18+ LOCKED"}</span>
+                    ) : null}
+                  </span>
+                </button>
+              );
+            })}
+          </div>
+          <section className={`chat-panel ${selected?.access.allowed ? "" : "scrambled"}`} aria-label="Selected chat">
+            <div className="preview-topline">
+              <span className="tracking" data-testid="selected-channel-number">
+                {selectedChannel}
+              </span>
+              <span className={`signal ${selected?.access.allowed ? "on-air" : "locked"}`}>{selectedAccess}</span>
+            </div>
+            <h2 data-testid="selected-channel-title">{selected?.title ?? "Channel Guide"}</h2>
+            <div className="message-log" role="log" aria-label={`${selected?.title ?? "Lina"} chat history`}>
+              {selectedMessages.length === 0 ? (
+                <p className="empty-chat">{composerDisabled ? lockText : "Start this persona thread."}</p>
+              ) : (
+                selectedMessages.map((message) => (
+                  <article className={`message-bubble ${message.role}`} key={message.id}>
+                    <span>{message.role === "user" ? "You" : selected?.title ?? "Lina"}</span>
+                    <p>{message.content}</p>
+                  </article>
+                ))
+              )}
+            </div>
+            {composerDisabled || sendError ? (
+              <div className="tune-status" role="status">
+                <p>{composerDisabled ? lockText : sendError}</p>
+              </div>
+            ) : null}
+            <form className="composer" onSubmit={handleSubmit}>
+              <textarea
+                aria-label={`Message ${selected?.title ?? "Lina"}`}
+                disabled={composerDisabled}
+                onChange={(event) => setDraft(event.target.value)}
+                placeholder={composerDisabled ? lockText : "Message"}
+                value={draft}
+              />
+              <button className="primary-command" disabled={composerDisabled || isSending || draft.trim().length === 0} type="submit">
+                {isSending ? "Sending" : "Send"}
               </button>
-            );
-          })}
+            </form>
+          </section>
         </section>
       ) : null}
 
@@ -242,6 +256,25 @@ export function MiniApp({ state, onAcceptExplicit }: Props) {
       </nav>
     </main>
   );
+}
+
+function characterToChatSummary(item: CharacterItem): ChatSummary {
+  return {
+    ...item,
+    last_message: null,
+    unread_count: 0,
+  };
+}
+
+function formatSendError(error: unknown): string {
+  const message = error instanceof Error ? error.message : String(error ?? "");
+  if (message.includes(":429")) {
+    return "Message limit reached.";
+  }
+  if (message.includes(":403")) {
+    return "This persona is locked.";
+  }
+  return "Message could not be sent.";
 }
 
 function channelNumber(index: number): string {

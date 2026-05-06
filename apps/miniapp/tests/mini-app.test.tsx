@@ -48,11 +48,45 @@ const state: MiniAppState = {
     messages: { used: 4, limit: 30, reset_at: 1234 },
     explicit_images: { used: 0, limit: 0, reset_at: 1234 },
   },
+  chats: {
+    items: [
+      {
+        id: "basic",
+        mode: "basic",
+        title: "AI Assistant",
+        category: "assistant",
+        default_tier: "free",
+        access: { allowed: true, reasons: [] },
+        last_message: { id: 10, role: "assistant", content: "Ready to help", created_at: 100 },
+        unread_count: 0,
+      },
+      {
+        id: "coach",
+        mode: "coach_premium",
+        title: "Coach",
+        category: "practice",
+        default_tier: "premium",
+        access: { allowed: false, reasons: ["premium_required"] },
+        last_message: null,
+        unread_count: 0,
+      },
+      {
+        id: "whore",
+        mode: "whore",
+        title: "Flirt 18+",
+        category: "explicit",
+        default_tier: "premium",
+        access: { allowed: false, reasons: ["explicit_consent_required"] },
+        last_message: null,
+        unread_count: 0,
+      },
+    ],
+  },
 };
 
 describe("MiniApp", () => {
   it("renders the midnight channel guide from backend-owned state", () => {
-    render(<MiniApp state={state} onAcceptExplicit={vi.fn()} />);
+    render(<MiniApp state={state} messagesByChat={{ basic: [] }} onAcceptExplicit={vi.fn()} onSendMessage={vi.fn()} />);
 
     expect(screen.getByText("Lina")).toBeInTheDocument();
     expect(screen.getAllByText("FREE PASS")).toHaveLength(2);
@@ -76,6 +110,11 @@ describe("MiniApp", () => {
       <MiniApp
         state={{
           ...state,
+          chats: {
+            items: state.chats.items.map((item) =>
+              item.category === "explicit" ? { ...item, access: { allowed: true, reasons: [] } } : item,
+            ),
+          },
           characters: {
             items: state.characters.items.map((item) =>
               item.category === "explicit" ? { ...item, access: { allowed: true, reasons: [] } } : item,
@@ -83,7 +122,9 @@ describe("MiniApp", () => {
           },
           entitlements: { ...state.entitlements, tier: "trial", explicit_consent: true, consent_required: false },
         }}
+        messagesByChat={{ basic: [] }}
         onAcceptExplicit={vi.fn()}
+        onSendMessage={vi.fn()}
       />,
     );
 
@@ -96,7 +137,7 @@ describe("MiniApp", () => {
   it("uses a backend consent action for restricted 18+ access", () => {
     const onAcceptExplicit = vi.fn();
 
-    render(<MiniApp state={state} onAcceptExplicit={onAcceptExplicit} />);
+    render(<MiniApp state={state} messagesByChat={{ basic: [] }} onAcceptExplicit={onAcceptExplicit} onSendMessage={vi.fn()} />);
     fireEvent.click(screen.getByRole("button", { name: "Access" }));
     expect(screen.getByText("18+ explicit access")).toBeInTheDocument();
     expect(
@@ -109,32 +150,33 @@ describe("MiniApp", () => {
     expect(onAcceptExplicit).toHaveBeenCalledOnce();
   });
 
-  it("lets the user select a channel and tune back in Telegram", () => {
-    render(<MiniApp state={state} onAcceptExplicit={vi.fn()} />);
+  it("lets the user select a locked persona and keeps the chat blocked", () => {
+    render(<MiniApp state={state} messagesByChat={{ basic: [] }} onAcceptExplicit={vi.fn()} onSendMessage={vi.fn()} />);
 
     fireEvent.click(screen.getByRole("button", { name: /CH 002 Coach/ }));
 
     expect(screen.getByTestId("selected-channel-title")).toHaveTextContent("Coach");
     expect(screen.getByTestId("selected-channel-number")).toHaveTextContent("CH 002");
-
-    fireEvent.click(screen.getByRole("button", { name: "Tune In" }));
-
-    expect(screen.getByRole("status")).toHaveTextContent("Coach is Premium locked");
-    expect(screen.getByRole("tabpanel", { name: "Access" })).toBeInTheDocument();
+    expect(screen.getByRole("status")).toHaveTextContent("Premium locked");
+    expect(screen.getByRole("textbox", { name: "Message Coach" })).toBeDisabled();
   });
 
-  it("turns an open channel tune action into a Telegram chat instruction", () => {
-    render(<MiniApp state={state} onAcceptExplicit={vi.fn()} />);
+  it("turns an open channel composer submit into a Mini App send", () => {
+    const onSendMessage = vi.fn();
 
-    fireEvent.click(screen.getByRole("button", { name: "Tune In" }));
+    render(<MiniApp state={state} messagesByChat={{ basic: [] }} onAcceptExplicit={vi.fn()} onSendMessage={onSendMessage} />);
 
-    expect(screen.getByRole("status")).toHaveTextContent("AI Assistant is ready");
-    expect(screen.getByRole("button", { name: "Return to Telegram" })).toBeInTheDocument();
-    expect(screen.getByText(/choose AI Assistant in/)).toBeInTheDocument();
+    fireEvent.change(screen.getByRole("textbox", { name: "Message AI Assistant" }), {
+      target: { value: "hello" },
+    });
+    fireEvent.click(screen.getByRole("button", { name: "Send" }));
+
+    expect(onSendMessage).toHaveBeenCalledWith("basic", "hello");
+    expect(screen.queryByRole("button", { name: "Return to Telegram" })).not.toBeInTheDocument();
   });
 
   it("switches bottom panels instead of using inert links", () => {
-    render(<MiniApp state={state} onAcceptExplicit={vi.fn()} />);
+    render(<MiniApp state={state} messagesByChat={{ basic: [] }} onAcceptExplicit={vi.fn()} onSendMessage={vi.fn()} />);
 
     fireEvent.click(screen.getByRole("button", { name: "Profile" }));
 
@@ -144,7 +186,7 @@ describe("MiniApp", () => {
   });
 
   it("makes Home a distinct active destination", () => {
-    render(<MiniApp state={state} onAcceptExplicit={vi.fn()} />);
+    render(<MiniApp state={state} messagesByChat={{ basic: [] }} onAcceptExplicit={vi.fn()} onSendMessage={vi.fn()} />);
 
     fireEvent.click(screen.getByRole("button", { name: "Profile" }));
     fireEvent.click(screen.getByRole("button", { name: "Home" }));
@@ -155,12 +197,72 @@ describe("MiniApp", () => {
   });
 
   it("sends explicit locked selections to the consent contract", () => {
-    render(<MiniApp state={state} onAcceptExplicit={vi.fn()} />);
+    render(<MiniApp state={state} messagesByChat={{ basic: [] }} onAcceptExplicit={vi.fn()} onSendMessage={vi.fn()} />);
 
     fireEvent.click(screen.getByRole("button", { name: /CH 003 Flirt 18\+/ }));
-    fireEvent.click(screen.getByRole("button", { name: "Tune In" }));
 
-    expect(screen.getByRole("status")).toHaveTextContent("18+ consent is required");
+    expect(screen.getByRole("status")).toHaveTextContent("18+ consent locked");
+    fireEvent.click(screen.getByRole("button", { name: "Access" }));
     expect(screen.getByText("18+ explicit access")).toBeInTheDocument();
+  });
+
+  it("renders a per-persona chat and sends text without returning to Telegram", () => {
+    const onSendMessage = vi.fn();
+
+    render(
+      <MiniApp
+        state={state}
+        messagesByChat={{
+          basic: [
+            { id: 1, role: "user", content: "Hello", created_at: 10 },
+            { id: 2, role: "assistant", content: "Hi from AI Assistant", created_at: 11 },
+          ],
+        }}
+        onAcceptExplicit={vi.fn()}
+        onSendMessage={onSendMessage}
+      />,
+    );
+
+    expect(screen.getByRole("log", { name: "AI Assistant chat history" })).toHaveTextContent("Hi from AI Assistant");
+    fireEvent.change(screen.getByRole("textbox", { name: "Message AI Assistant" }), {
+      target: { value: "New message" },
+    });
+    fireEvent.click(screen.getByRole("button", { name: "Send" }));
+
+    expect(onSendMessage).toHaveBeenCalledWith("basic", "New message");
+    expect(screen.queryByRole("button", { name: "Return to Telegram" })).not.toBeInTheDocument();
+  });
+
+  it("switches persona chat history and disables locked composers", () => {
+    render(
+      <MiniApp
+        state={state}
+        messagesByChat={{
+          basic: [{ id: 1, role: "assistant", content: "Basic only", created_at: 10 }],
+          coach: [],
+        }}
+        onAcceptExplicit={vi.fn()}
+        onSendMessage={vi.fn()}
+      />,
+    );
+
+    fireEvent.click(screen.getByRole("button", { name: /CH 002 Coach/ }));
+
+    expect(screen.getByRole("log", { name: "Coach chat history" })).not.toHaveTextContent("Basic only");
+    expect(screen.getByRole("textbox", { name: "Message Coach" })).toBeDisabled();
+    expect(screen.getAllByText("Premium locked").length).toBeGreaterThan(0);
+  });
+
+  it("shows usage-limit send errors from the backend", async () => {
+    const onSendMessage = vi.fn().mockRejectedValue(new Error("api_request_failed:/api/miniapp/chats/basic/messages:429"));
+
+    render(<MiniApp state={state} messagesByChat={{ basic: [] }} onAcceptExplicit={vi.fn()} onSendMessage={onSendMessage} />);
+
+    fireEvent.change(screen.getByRole("textbox", { name: "Message AI Assistant" }), {
+      target: { value: "one more" },
+    });
+    fireEvent.click(screen.getByRole("button", { name: "Send" }));
+
+    expect(await screen.findByRole("status")).toHaveTextContent("Message limit reached.");
   });
 });

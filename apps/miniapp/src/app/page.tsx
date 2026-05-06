@@ -3,7 +3,15 @@
 import { useEffect, useMemo, useState } from "react";
 
 import { MiniApp } from "../components/mini-app";
-import { acceptExplicitConsent, createBrowserTokenStore, loadMiniAppState, type MiniAppState } from "../lib/api";
+import {
+  acceptExplicitConsent,
+  createBrowserTokenStore,
+  loadChatMessages,
+  loadMiniAppState,
+  sendChatMessage,
+  type ChatMessage,
+  type MiniAppState,
+} from "../lib/api";
 
 declare global {
   interface Window {
@@ -24,6 +32,7 @@ const telegramInitDataPollMs = 100;
 
 export default function Page() {
   const [state, setState] = useState<MiniAppState | null>(null);
+  const [messagesByChat, setMessagesByChat] = useState<Record<string, ChatMessage[]>>({});
   const [error, setError] = useState<string>("");
   const tokenStore = useMemo(() => createBrowserTokenStore(), []);
 
@@ -44,6 +53,16 @@ export default function Page() {
           .then((nextState) => {
             if (!cancelled) {
               setState(nextState);
+              const firstChatId = nextState.chats.items[0]?.id;
+              if (firstChatId) {
+                loadChatMessages({ apiBaseUrl, initData, tokenStore, characterId: firstChatId })
+                  .then((messages) => {
+                    if (!cancelled) {
+                      setMessagesByChat((current) => ({ ...current, [firstChatId]: messages.items }));
+                    }
+                  })
+                  .catch(() => undefined);
+              }
             }
           })
           .catch(() => {
@@ -61,6 +80,40 @@ export default function Page() {
     const initData = window.Telegram?.WebApp?.initData ?? "";
     await acceptExplicitConsent({ apiBaseUrl, initData, tokenStore });
     setState(await loadMiniAppState({ apiBaseUrl, initData, tokenStore }));
+  }
+
+  async function handleSendMessage(characterId: string, text: string) {
+    const initData = window.Telegram?.WebApp?.initData ?? "";
+    const sent = await sendChatMessage({ apiBaseUrl, initData, tokenStore, characterId, text });
+    setMessagesByChat((current) => ({
+      ...current,
+      [characterId]: [...(current[characterId] ?? []), sent.user_message, sent.assistant_message],
+    }));
+    setState((current) =>
+      current
+        ? {
+            ...current,
+            usage: {
+              ...current.usage,
+              messages: sent.usage.messages,
+            },
+            chats: {
+              items: current.chats.items.map((item) =>
+                item.id === characterId ? { ...item, last_message: sent.assistant_message } : item,
+              ),
+            },
+          }
+        : current,
+    );
+  }
+
+  async function handleSelectChat(characterId: string) {
+    if (messagesByChat[characterId]) {
+      return;
+    }
+    const initData = window.Telegram?.WebApp?.initData ?? "";
+    const messages = await loadChatMessages({ apiBaseUrl, initData, tokenStore, characterId });
+    setMessagesByChat((current) => ({ ...current, [characterId]: messages.items }));
   }
 
   if (error) {
@@ -81,7 +134,15 @@ export default function Page() {
     );
   }
 
-  return <MiniApp state={state} onAcceptExplicit={handleAcceptExplicit} />;
+  return (
+    <MiniApp
+      state={state}
+      messagesByChat={messagesByChat}
+      onAcceptExplicit={handleAcceptExplicit}
+      onSelectChat={handleSelectChat}
+      onSendMessage={handleSendMessage}
+    />
+  );
 }
 
 async function waitForTelegramInitData(): Promise<string> {
