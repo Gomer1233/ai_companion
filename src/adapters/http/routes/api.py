@@ -188,7 +188,10 @@ def _catalog_item_or_404(character_id: str):
 
 def _miniapp_chat_service(request: Request) -> MiniAppChatService:
     dependencies = request.app.state.dependencies
-    responder = dependencies.chat_responder or build_default_chat_responder(dependencies.settings)
+    responder = dependencies.chat_responder or build_default_chat_responder(
+        dependencies.settings,
+        access_policy=dependencies.access_policy,
+    )
     return MiniAppChatService(
         repositories=dependencies.repositories,
         monetization=MonetizationService(dependencies.repositories),

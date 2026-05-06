@@ -50,6 +50,7 @@ class AppDependencies:
     readiness: ReadinessState
     session_rate_limiter: SessionRateLimiter = field(default_factory=SessionRateLimiter)
     chat_responder: Any = None
+    access_policy: Any = None
 
 
 def get_app_dependencies(request: Request) -> AppDependencies:

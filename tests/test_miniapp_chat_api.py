@@ -2,9 +2,13 @@ from __future__ import annotations
 
 import time
 from pathlib import Path
+from types import SimpleNamespace
+from unittest.mock import AsyncMock
 
 from fastapi.testclient import TestClient
+import pytest
 
+from src.core.chat_service import build_default_chat_responder
 from src.core.contracts import UserRef
 from src.core.monetization import MonetizationService
 from tests.test_http_api import _issue_token, _make_client
@@ -107,3 +111,21 @@ def test_miniapp_unknown_chat_returns_404(tmp_path: Path) -> None:
 
     assert response.status_code == 404
     assert response.json() == {"detail": "character_not_found"}
+
+
+@pytest.mark.asyncio
+async def test_miniapp_explicit_text_policy_blocks_llm_call(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    _client, deps = _make_client(tmp_path)
+    llm = AsyncMock(return_value=("blocked bypass", "stop", {"total_tokens": 1}))
+    monkeypatch.setattr("src.core.chat_service.call_openrouter_with_meta", llm)
+
+    class BlockingPolicy:
+        def authorize_explicit(self, request):
+            return SimpleNamespace(allowed=False, reasons=("provider_not_allowed",))
+
+    responder = build_default_chat_responder(deps.settings, access_policy=BlockingPolicy())
+
+    with pytest.raises(RuntimeError, match="Explicit text request blocked"):
+        await responder(mode="whore", messages=[{"role": "user", "content": "hello"}], user_text="hello")
+
+    llm.assert_not_awaited()

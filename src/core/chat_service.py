@@ -8,6 +8,7 @@ from typing import Any, Awaitable, Callable, Mapping
 import httpx
 
 from src.app.settings import Settings
+from src.core.access_policy import AccessPolicyService, ExplicitCapability, ExplicitPolicyInput
 from src.core.contracts import ConversationRecord, ConversationRef, UserRef
 from src.core.monetization import MonetizationService
 from src.core.runtime_helpers import (
@@ -139,12 +140,29 @@ class MiniAppChatService:
         }
 
 
-def build_default_chat_responder(settings: Settings) -> ChatResponder:
+def build_default_chat_responder(
+    settings: Settings,
+    *,
+    access_policy: AccessPolicyService | None = None,
+) -> ChatResponder:
+    resolved_access_policy = access_policy or AccessPolicyService.alpha_default()
+
     async def responder(*, mode: str, messages: list[dict[str, str]], user_text: str) -> str:
         from src.config.modes import MODE_TO_MODEL, MODE_TO_SYSTEM_PROMPT, MODE_TO_TEMPERATURE
 
         system_prompt = MODE_TO_SYSTEM_PROMPT.get(mode) or MODE_TO_SYSTEM_PROMPT["basic"]
         model = MODE_TO_MODEL.get(mode, settings.default_model)
+        text_decision = resolved_access_policy.authorize_explicit(
+            ExplicitPolicyInput(
+                mode=mode,
+                capability=ExplicitCapability.TEXT,
+                provider="openrouter",
+                model=model,
+            )
+        )
+        if not text_decision.allowed:
+            raise RuntimeError(f"Explicit text request blocked: {', '.join(text_decision.reasons)}")
+
         temperature = float(MODE_TO_TEMPERATURE.get(mode, MODE_TO_TEMPERATURE.get("basic", 0.7)))
         async with httpx.AsyncClient(timeout=90.0) as client:
             reply, finish_reason, _usage = await call_openrouter_with_meta(
