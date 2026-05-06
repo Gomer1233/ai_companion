@@ -136,6 +136,19 @@ describe("Mini App page", () => {
     await waitFor(() => expect(screen.queryByRole("status")).not.toBeInTheDocument());
     expect(screen.getByText("Start this persona thread.")).toBeInTheDocument();
   });
+
+  it("opens a local demo shell on localhost when API configuration is missing", async () => {
+    vi.stubEnv("NEXT_PUBLIC_API_BASE_URL", "");
+    window.Telegram = undefined;
+    const { default: Page } = await import("../src/app/page");
+
+    render(<Page />);
+
+    expect(await screen.findByRole("tabpanel", { name: "Chats" })).toBeInTheDocument();
+    expect(screen.getByText("Local demo thread is ready.")).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Support" })).toBeInTheDocument();
+    expect(loadMiniAppState).not.toHaveBeenCalled();
+  });
 });
 
 function deferred<T>() {
