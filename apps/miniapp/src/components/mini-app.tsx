@@ -8,17 +8,29 @@ import type { ChatMessage, ChatSummary, CharacterItem, MiniAppState } from "../l
 type Props = {
   state: MiniAppState;
   messagesByChat: Record<string, ChatMessage[]>;
+  loadingChatIds?: Record<string, boolean>;
+  chatErrors?: Record<string, string>;
   onAcceptExplicit: () => void | Promise<void>;
+  onRefreshChat?: (characterId: string) => void | Promise<void>;
   onSelectChat?: (characterId: string) => void | Promise<void>;
   onSendMessage: (characterId: string, text: string) => void | Promise<void>;
 };
 
-type Panel = "home" | "guide" | "access" | "profile";
+type Panel = "chats" | "access" | "profile" | "support";
 
-export function MiniApp({ state, messagesByChat, onAcceptExplicit, onSelectChat, onSendMessage }: Props) {
+export function MiniApp({
+  state,
+  messagesByChat,
+  loadingChatIds = {},
+  chatErrors = {},
+  onAcceptExplicit,
+  onRefreshChat,
+  onSelectChat,
+  onSendMessage,
+}: Props) {
   const chats = state.chats.items.length > 0 ? state.chats.items : state.characters.items.map(characterToChatSummary);
   const [selectedId, setSelectedId] = useState<string | null>(chats[0]?.id ?? null);
-  const [activePanel, setActivePanel] = useState<Panel>("guide");
+  const [activePanel, setActivePanel] = useState<Panel>("chats");
   const [draft, setDraft] = useState<string>("");
   const [isSending, setIsSending] = useState<boolean>(false);
   const [sendError, setSendError] = useState<string>("");
@@ -33,12 +45,16 @@ export function MiniApp({ state, messagesByChat, onAcceptExplicit, onSelectChat,
   const passLabel = planPassLabel(state.entitlements.tier);
   const selectedAccess = selected ? accessLabel(selected) : "NO SIGNAL";
   const selectedMessages = selected ? messagesByChat[selected.id] ?? [] : [];
-  const composerDisabled = !selected?.access.allowed;
+  const selectedIsLoading = selected ? loadingChatIds[selected.id] === true : false;
+  const selectedChatError = selected ? chatErrors[selected.id] ?? "" : "";
+  const threadUnavailable = selectedIsLoading || selectedChatError.length > 0;
+  const composerDisabled = !selected?.access.allowed || threadUnavailable;
   const lockText = selected && !selected.access.allowed ? lockedReason(selected) : "";
+  const statusText = selectedIsLoading ? "Loading thread..." : selectedChatError || lockText || sendError;
 
   function handleSelect(item: ChatSummary) {
     setSelectedId(item.id);
-    setActivePanel("guide");
+    setActivePanel("chats");
     setDraft("");
     setSendError("");
     void onSelectChat?.(item.id);
@@ -63,7 +79,7 @@ export function MiniApp({ state, messagesByChat, onAcceptExplicit, onSelectChat,
   }
 
   return (
-    <main className="shell" id="home" data-testid="mini-app-shell">
+    <main className="shell" data-testid="mini-app-shell">
       <header className="osd">
         <div className="osd-brand">
           <p className="osd-kicker">LIVE / MINI APP</p>
@@ -104,19 +120,8 @@ export function MiniApp({ state, messagesByChat, onAcceptExplicit, onSelectChat,
         </div>
       </section>
 
-      {activePanel === "home" ? (
-        <section className="panel-stack" role="tabpanel" aria-label="Home">
-          <article className="info-panel">
-            <p className="label">Now airing</p>
-            <h2>{selected?.title ?? "Channel Guide"}</h2>
-            <p>{selected ? `${selectedChannel} ${channelHint(selected.category)}` : "Choose a channel from Chats."}</p>
-            <p>{selected ? `${accessLabel(selected)} / ${passLabel}` : "No channel selected"}</p>
-          </article>
-        </section>
-      ) : null}
-
-      {activePanel === "guide" ? (
-        <section className="chat-layout" id="channels" role="tabpanel" aria-label="Guide">
+      {activePanel === "chats" ? (
+        <section className="chat-layout" id="channels" role="tabpanel" aria-label="Chats">
           <div className="guide" aria-label="Chats">
             {chats.map((item, index) => {
               const number = channelNumber(index);
@@ -148,6 +153,7 @@ export function MiniApp({ state, messagesByChat, onAcceptExplicit, onSelectChat,
                     {item.category === "explicit" ? (
                       <span className="badge danger">{item.access.allowed ? "18+ OPEN" : "18+ LOCKED"}</span>
                     ) : null}
+                    {item.unread_count > 0 ? <span className="badge">{item.unread_count}</span> : null}
                   </span>
                 </button>
               );
@@ -158,12 +164,28 @@ export function MiniApp({ state, messagesByChat, onAcceptExplicit, onSelectChat,
               <span className="tracking" data-testid="selected-channel-number">
                 {selectedChannel}
               </span>
-              <span className={`signal ${selected?.access.allowed ? "on-air" : "locked"}`}>{selectedAccess}</span>
+              <div className="chat-actions">
+                {selected ? (
+                  <button
+                    className="micro-command"
+                    disabled={selectedIsLoading}
+                    type="button"
+                    onClick={() => void onRefreshChat?.(selected.id)}
+                  >
+                    Refresh thread
+                  </button>
+                ) : null}
+                <span className={`signal ${selected?.access.allowed ? "on-air" : "locked"}`}>{selectedAccess}</span>
+              </div>
             </div>
             <h2 data-testid="selected-channel-title">{selected?.title ?? "Channel Guide"}</h2>
             <div className="message-log" role="log" aria-label={`${selected?.title ?? "Lina"} chat history`}>
-              {selectedMessages.length === 0 ? (
-                <p className="empty-chat">{composerDisabled ? lockText : "Start this persona thread."}</p>
+              {selectedIsLoading ? (
+                <p className="empty-chat">Loading thread...</p>
+              ) : selectedChatError ? (
+                <p className="empty-chat">Thread unavailable.</p>
+              ) : selectedMessages.length === 0 ? (
+                <p className="empty-chat">{!selected?.access.allowed ? lockText : "Start this persona thread."}</p>
               ) : (
                 selectedMessages.map((message) => (
                   <article className={`message-bubble ${message.role}`} key={message.id}>
@@ -173,9 +195,14 @@ export function MiniApp({ state, messagesByChat, onAcceptExplicit, onSelectChat,
                 ))
               )}
             </div>
-            {composerDisabled || sendError ? (
+            {statusText ? (
               <div className="tune-status" role="status">
-                <p>{composerDisabled ? lockText : sendError}</p>
+                <p>{statusText}</p>
+                {selectedChatError && selected ? (
+                  <button className="secondary-command compact-command" type="button" onClick={() => void onRefreshChat?.(selected.id)}>
+                    Retry thread
+                  </button>
+                ) : null}
               </div>
             ) : null}
             <form className="composer" onSubmit={handleSubmit}>
@@ -183,7 +210,7 @@ export function MiniApp({ state, messagesByChat, onAcceptExplicit, onSelectChat,
                 aria-label={`Message ${selected?.title ?? "Lina"}`}
                 disabled={composerDisabled}
                 onChange={(event) => setDraft(event.target.value)}
-                placeholder={composerDisabled ? lockText : "Message"}
+                placeholder={composerDisabled ? statusText : "Message"}
                 value={draft}
               />
               <button className="primary-command" disabled={composerDisabled || isSending || draft.trim().length === 0} type="submit">
@@ -240,11 +267,21 @@ export function MiniApp({ state, messagesByChat, onAcceptExplicit, onSelectChat,
         </section>
       ) : null}
 
+      {activePanel === "support" ? (
+        <section className="panel-stack" id="support" role="tabpanel" aria-label="Support">
+          <article className="info-panel">
+            <p className="label">Support</p>
+            <h2>Mini App support</h2>
+            <p>
+              Route <code>/support miniapp</code>
+            </p>
+            <p>Use this route for alpha access, session, consent, export, and deletion requests.</p>
+          </article>
+        </section>
+      ) : null}
+
       <nav className="bottom-nav" aria-label="Mini App sections">
-        <button type="button" aria-selected={activePanel === "home"} onClick={() => setActivePanel("home")}>
-          Home
-        </button>
-        <button type="button" aria-selected={activePanel === "guide"} onClick={() => setActivePanel("guide")}>
+        <button type="button" aria-selected={activePanel === "chats"} onClick={() => setActivePanel("chats")}>
           Chats
         </button>
         <button type="button" aria-selected={activePanel === "access"} onClick={() => setActivePanel("access")}>
@@ -252,6 +289,9 @@ export function MiniApp({ state, messagesByChat, onAcceptExplicit, onSelectChat,
         </button>
         <button type="button" aria-selected={activePanel === "profile"} onClick={() => setActivePanel("profile")}>
           Profile
+        </button>
+        <button type="button" aria-selected={activePanel === "support"} onClick={() => setActivePanel("support")}>
+          Support
         </button>
       </nav>
     </main>

@@ -101,8 +101,9 @@ describe("MiniApp", () => {
     expect(screen.getByText("Cooldown 300 sec")).toBeInTheDocument();
     expect(screen.getByText("User 42")).toBeInTheDocument();
     expect(screen.getByRole("navigation", { name: "Mini App sections" })).toBeInTheDocument();
-    expect(document.getElementById("home")).not.toBeNull();
     expect(document.getElementById("channels")).not.toBeNull();
+    expect(screen.getByRole("button", { name: "Chats" })).toHaveAttribute("aria-selected", "true");
+    expect(screen.queryByRole("button", { name: "Home" })).not.toBeInTheDocument();
   });
 
   it("renders explicit trial access from backend access flags", () => {
@@ -185,15 +186,15 @@ describe("MiniApp", () => {
     expect(screen.getByText("/support miniapp")).toBeInTheDocument();
   });
 
-  it("makes Home a distinct active destination", () => {
+  it("keeps support as a secondary app section", () => {
     render(<MiniApp state={state} messagesByChat={{ basic: [] }} onAcceptExplicit={vi.fn()} onSendMessage={vi.fn()} />);
 
     fireEvent.click(screen.getByRole("button", { name: "Profile" }));
-    fireEvent.click(screen.getByRole("button", { name: "Home" }));
+    fireEvent.click(screen.getByRole("button", { name: "Support" }));
 
-    expect(screen.getByRole("button", { name: "Home" })).toHaveAttribute("aria-selected", "true");
     expect(screen.getByRole("button", { name: "Chats" })).toHaveAttribute("aria-selected", "false");
-    expect(screen.getByRole("tabpanel", { name: "Home" })).toHaveTextContent("Now airing");
+    expect(screen.getByRole("button", { name: "Support" })).toHaveAttribute("aria-selected", "true");
+    expect(screen.getByRole("tabpanel", { name: "Support" })).toHaveTextContent("/support miniapp");
   });
 
   it("sends explicit locked selections to the consent contract", () => {
@@ -264,5 +265,40 @@ describe("MiniApp", () => {
     fireEvent.click(screen.getByRole("button", { name: "Send" }));
 
     expect(await screen.findByRole("status")).toHaveTextContent("Message limit reached.");
+  });
+
+  it("shows loading state while a selected persona thread is loading", () => {
+    render(
+      <MiniApp
+        state={state}
+        messagesByChat={{ basic: [] }}
+        loadingChatIds={{ basic: true }}
+        onAcceptExplicit={vi.fn()}
+        onSendMessage={vi.fn()}
+      />,
+    );
+
+    expect(screen.getByRole("status")).toHaveTextContent("Loading thread...");
+    expect(screen.getByRole("textbox", { name: "Message AI Assistant" })).toBeDisabled();
+  });
+
+  it("shows chat load errors with retry for the selected persona", () => {
+    const onRefreshChat = vi.fn();
+
+    render(
+      <MiniApp
+        state={state}
+        messagesByChat={{ basic: [] }}
+        chatErrors={{ basic: "Could not load this thread." }}
+        onAcceptExplicit={vi.fn()}
+        onRefreshChat={onRefreshChat}
+        onSendMessage={vi.fn()}
+      />,
+    );
+
+    expect(screen.getByRole("status")).toHaveTextContent("Could not load this thread.");
+    fireEvent.click(screen.getByRole("button", { name: "Retry thread" }));
+
+    expect(onRefreshChat).toHaveBeenCalledWith("basic");
   });
 });

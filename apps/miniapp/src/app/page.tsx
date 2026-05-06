@@ -33,6 +33,8 @@ const telegramInitDataPollMs = 100;
 export default function Page() {
   const [state, setState] = useState<MiniAppState | null>(null);
   const [messagesByChat, setMessagesByChat] = useState<Record<string, ChatMessage[]>>({});
+  const [loadingChatIds, setLoadingChatIds] = useState<Record<string, boolean>>({});
+  const [chatErrors, setChatErrors] = useState<Record<string, string>>({});
   const [error, setError] = useState<string>("");
   const tokenStore = useMemo(() => createBrowserTokenStore(), []);
 
@@ -55,13 +57,24 @@ export default function Page() {
               setState(nextState);
               const firstChatId = nextState.chats.items[0]?.id;
               if (firstChatId) {
+                setLoadingChatIds((current) => ({ ...current, [firstChatId]: true }));
+                setChatErrors((current) => ({ ...current, [firstChatId]: "" }));
                 loadChatMessages({ apiBaseUrl, initData, tokenStore, characterId: firstChatId })
                   .then((messages) => {
                     if (!cancelled) {
                       setMessagesByChat((current) => ({ ...current, [firstChatId]: messages.items }));
                     }
                   })
-                  .catch(() => undefined);
+                  .catch(() => {
+                    if (!cancelled) {
+                      setChatErrors((current) => ({ ...current, [firstChatId]: "Could not load this thread." }));
+                    }
+                  })
+                  .finally(() => {
+                    if (!cancelled) {
+                      setLoadingChatIds((current) => ({ ...current, [firstChatId]: false }));
+                    }
+                  });
               }
             }
           })
@@ -107,13 +120,29 @@ export default function Page() {
     );
   }
 
-  async function handleSelectChat(characterId: string) {
-    if (messagesByChat[characterId]) {
+  async function loadMessagesForChat(characterId: string, force = false) {
+    if (!force && messagesByChat[characterId]) {
       return;
     }
     const initData = window.Telegram?.WebApp?.initData ?? "";
-    const messages = await loadChatMessages({ apiBaseUrl, initData, tokenStore, characterId });
-    setMessagesByChat((current) => ({ ...current, [characterId]: messages.items }));
+    setLoadingChatIds((current) => ({ ...current, [characterId]: true }));
+    setChatErrors((current) => ({ ...current, [characterId]: "" }));
+    try {
+      const messages = await loadChatMessages({ apiBaseUrl, initData, tokenStore, characterId });
+      setMessagesByChat((current) => ({ ...current, [characterId]: messages.items }));
+    } catch {
+      setChatErrors((current) => ({ ...current, [characterId]: "Could not load this thread." }));
+    } finally {
+      setLoadingChatIds((current) => ({ ...current, [characterId]: false }));
+    }
+  }
+
+  async function handleSelectChat(characterId: string) {
+    await loadMessagesForChat(characterId);
+  }
+
+  async function handleRefreshChat(characterId: string) {
+    await loadMessagesForChat(characterId, true);
   }
 
   if (error) {
@@ -138,7 +167,10 @@ export default function Page() {
     <MiniApp
       state={state}
       messagesByChat={messagesByChat}
+      loadingChatIds={loadingChatIds}
+      chatErrors={chatErrors}
       onAcceptExplicit={handleAcceptExplicit}
+      onRefreshChat={handleRefreshChat}
       onSelectChat={handleSelectChat}
       onSendMessage={handleSendMessage}
     />

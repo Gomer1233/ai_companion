@@ -120,4 +120,30 @@ describe("Mini App page", () => {
     );
     expect((await screen.findAllByText("18+ LOCKED")).length).toBeGreaterThan(0);
   });
+
+  it("surfaces initial thread loading state until messages arrive", async () => {
+    const pendingMessages = deferred<{ items: [] }>();
+    loadMiniAppState.mockResolvedValueOnce(updatedState);
+    loadChatMessages.mockReturnValueOnce(pendingMessages.promise);
+    const { default: Page } = await import("../src/app/page");
+
+    render(<Page />);
+
+    expect(await screen.findByRole("status")).toHaveTextContent("Loading thread...");
+
+    pendingMessages.resolve({ items: [] });
+
+    await waitFor(() => expect(screen.queryByRole("status")).not.toBeInTheDocument());
+    expect(screen.getByText("Start this persona thread.")).toBeInTheDocument();
+  });
 });
+
+function deferred<T>() {
+  let resolve!: (value: T) => void;
+  let reject!: (reason?: unknown) => void;
+  const promise = new Promise<T>((promiseResolve, promiseReject) => {
+    resolve = promiseResolve;
+    reject = promiseReject;
+  });
+  return { promise, resolve, reject };
+}
