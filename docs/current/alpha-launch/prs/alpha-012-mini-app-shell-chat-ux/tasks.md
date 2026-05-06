@@ -1,6 +1,6 @@
 # Tasks
 
-- [ ] Reconcile ALPHA-011 as `Done` after it is merged.
+- [x] Reconcile ALPHA-011 as `Done` after it is merged.
 - [ ] Audit the ALPHA-011 Mini App UI against the chat-first product goal.
 - [ ] Add frontend tests for app-shell navigation and chat-primary layout.
 - [ ] Add frontend tests for empty, loading, sending, error, locked, and usage-limit states.

@@ -26,7 +26,8 @@
 - `ALPHA-008 Mini App Alpha` is merged to `main`.
 - `ALPHA-009 Compliance Completion + Alpha Ops` is merged to `main`.
 - `ALPHA-010 Deploy to Railway + Vercel + Supabase` is merged to `main`.
-- `ALPHA-011 Mini App Chat Foundation` is ready for review as a post-deploy product correction for the Telegram Mini App.
+- `ALPHA-011 Mini App Chat Foundation` is merged to `main`.
+- `ALPHA-012 Mini App App Shell + Chat UX` is in progress.
 - Post-alpha standalone Web direction is captured as an accepted identity/readiness decision: `docs/adr/0002-user-identity-and-standalone-web-readiness.md`.
 
 ## Completed
@@ -160,7 +161,7 @@
 
 ## Next Step
 
-Review and merge `ALPHA-011 Mini App Chat Foundation`, then start `ALPHA-012 Mini App App Shell + Chat UX` after merge/status reconciliation.
+Implement `ALPHA-012 Mini App App Shell + Chat UX`: refine the ALPHA-011 chat foundation into a coherent chat-first app shell with clearer navigation, loading/sending/error/locked states, and reset/support secondary flows.
 
 ## Risks / Notes
 
