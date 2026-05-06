@@ -12,14 +12,29 @@
 | ALPHA-008 | Mini App Alpha | ALPHA-006, ALPHA-007 | Done | `prs/alpha-008-mini-app-alpha/brief.md` |
 | ALPHA-009 | Compliance Completion + Alpha Ops | ALPHA-006 | Done | `prs/alpha-009-compliance-ops/brief.md` |
 | ALPHA-010 | Deploy to Railway + Vercel + Supabase | ALPHA-008, ALPHA-009 | Done | `prs/alpha-010-deploy/brief.md` |
+| ALPHA-011 | Mini App Chat Foundation | ALPHA-010 | In Progress | `prs/alpha-011-mini-app-chat-foundation/brief.md` |
+| ALPHA-012 | Mini App App Shell + Chat UX | ALPHA-011 | Planned | `prs/alpha-012-mini-app-shell-chat-ux/brief.md` |
+| ALPHA-013 | Mini App Image Jobs | ALPHA-012 | Planned | `prs/alpha-013-mini-app-image-jobs/brief.md` |
+| ALPHA-014 | Alpha Product Readiness + Ops Polish | ALPHA-013 | Planned | `prs/alpha-014-product-readiness-ops-polish/brief.md` |
+
+## Alpha Mini App Follow-Up Backlog
+
+These are still alpha Mini App items, not standalone Web work. Identity remains Telegram-linked, Railway remains backend truth, and Vercel remains frontend-only.
+
+| PR | Title | Depends On | Status | Scope |
+| --- | --- | --- | --- | --- |
+| ALPHA-011 | Mini App Chat Foundation | ALPHA-010 | In Progress | Text-only per-persona chats, backend send flow, history isolation, access/usage/consent checks. |
+| ALPHA-012 | Mini App App Shell + Chat UX | ALPHA-011 | Planned | Chat-first layout, navigation, empty/loading/error states, locked states, reset thread, profile/access/support as secondary screens. |
+| ALPHA-013 | Mini App Image Jobs | ALPHA-012 | Planned | Image generation through existing job lifecycle: start job, poll status, display result, cancel/retry, owner checks. |
+| ALPHA-014 | Alpha Product Readiness + Ops Polish | ALPHA-013 | Planned | Smoke/e2e, UX copy, support/account flows, telemetry/logging gaps, launch checklist. |
 
 ## Post-Alpha Web Backlog
 
-These items are intentionally outside alpha launch scope. They preserve the product direction that standalone Web becomes a full client with chat after `ALPHA-010`, while alpha remains Telegram-first.
+These items are intentionally outside alpha launch scope. They preserve the product direction that standalone Web becomes a full client after the alpha Mini App follow-up chain is productized through `ALPHA-014`. `ALPHA-011` through `ALPHA-014` are not standalone Web identity work; they are Telegram-linked Mini App product work for the existing alpha cohort.
 
 | Item | Title | Depends On | Status |
 | --- | --- | --- | --- |
-| WEB-001 | Standalone Web Identity | ALPHA-010 | Planned |
+| WEB-001 | Standalone Web Identity | ALPHA-014 | Planned |
 | WEB-002 | Standalone Web Shell | WEB-001 | Planned |
 | WEB-003 | Web Chat | WEB-002 | Planned |
 | WEB-004 | Web Monetization | WEB-003 | Planned |

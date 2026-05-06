@@ -1,0 +1,39 @@
+# Tasks
+
+- [x] Reconcile `docs/current/alpha-launch/pr-backlog.md` and `docs/current/alpha-launch/status.md` after PR #18 merge.
+- [ ] Add backend tests for protected Mini App chat endpoints:
+  - `GET /api/miniapp/chats`
+  - `GET /api/miniapp/chats/{character_id}/messages`
+  - `POST /api/miniapp/chats/{character_id}/messages`
+- [ ] Add backend usage tests for Mini App sends:
+  - reject send when message quota is exhausted
+  - return `429 usage_limit_exceeded` for quota rejection
+  - record message usage exactly once after a successful assistant reply
+  - do not record message usage when access, consent, or quota rejects the send
+- [ ] Add repository tests proving per-persona histories are isolated by `UserRef + mode`.
+- [ ] Add or reuse repository methods for deterministic Mini App persona conversations.
+- [ ] Extract or wrap shared text-turn orchestration so HTTP Mini App sends do not duplicate Telegram provider/access/history logic.
+- [ ] Implement protected Railway API endpoints for chat list, message history, and text send.
+- [ ] Add backend access-block tests for premium and explicit personas.
+- [ ] Extend `apps/miniapp/src/lib/api.ts` with chat list/history/send calls.
+- [ ] Replace the Mini App guide-primary surface with persona list plus active text chat panel.
+- [ ] Add composer states:
+  - idle
+  - sending
+  - backend error
+  - locked persona
+  - usage limit reached
+- [ ] Keep Access/Profile as secondary panels rather than the primary Mini App purpose.
+- [ ] Add frontend tests for:
+  - opening one persona history
+  - switching to a second persona history
+  - sending a text message
+  - blocked premium send
+  - blocked explicit send before consent
+  - no frontend-owned entitlement decisions
+- [ ] Run backend verification for touched scope.
+- [ ] Run Mini App verification:
+  - `npm test`
+  - `npm run typecheck`
+  - `npm run build`
+- [ ] Update `docs/current/alpha-launch/status.md` when implementation is ready for review.
