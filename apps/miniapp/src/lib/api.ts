@@ -27,6 +27,18 @@ export type CharacterItem = {
   };
 };
 
+export type ChatMessage = {
+  id: number;
+  role: "user" | "assistant";
+  content: string;
+  created_at: number;
+};
+
+export type ChatSummary = CharacterItem & {
+  last_message: ChatMessage | null;
+  unread_count: number;
+};
+
 export type Entitlements = {
   tier: string;
   tier_expires_at: number | null;
@@ -57,6 +69,9 @@ export type MiniAppState = {
     messages: UsageBucket;
     explicit_images: UsageBucket;
   };
+  chats: {
+    items: ChatSummary[];
+  };
 };
 
 type ApiOptions = {
@@ -65,6 +80,26 @@ type ApiOptions = {
   tokenStore: TokenStore;
   fetchImpl?: typeof fetch;
   telegramInitMaxAgeSec?: number;
+};
+
+type ChatApiOptions = ApiOptions & {
+  characterId: string;
+};
+
+type SendChatApiOptions = ChatApiOptions & {
+  text: string;
+};
+
+export type ChatMessagesResponse = {
+  items: ChatMessage[];
+};
+
+export type SendChatMessageResponse = {
+  user_message: ChatMessage;
+  assistant_message: ChatMessage;
+  usage: {
+    messages: UsageBucket;
+  };
 };
 
 export function createMemoryTokenStore(): TokenStore {
@@ -118,7 +153,8 @@ export async function loadMiniAppState(options: ApiOptions): Promise<MiniAppStat
   const characters = await authorizedJson<MiniAppState["characters"]>(options, "/api/characters");
   const entitlements = await authorizedJson<Entitlements>(options, "/api/entitlements");
   const usage = await authorizedJson<MiniAppState["usage"]>(options, "/api/usage");
-  return { me, characters, entitlements, usage };
+  const chats = await authorizedJson<MiniAppState["chats"]>(options, "/api/miniapp/chats");
+  return { me, characters, entitlements, usage, chats };
 }
 
 export async function acceptExplicitConsent(options: ApiOptions): Promise<Entitlements> {
@@ -126,6 +162,18 @@ export async function acceptExplicitConsent(options: ApiOptions): Promise<Entitl
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({ accepted: true }),
+  });
+}
+
+export async function loadChatMessages(options: ChatApiOptions): Promise<ChatMessagesResponse> {
+  return authorizedJson<ChatMessagesResponse>(options, `/api/miniapp/chats/${options.characterId}/messages`);
+}
+
+export async function sendChatMessage(options: SendChatApiOptions): Promise<SendChatMessageResponse> {
+  return authorizedJson<SendChatMessageResponse>(options, `/api/miniapp/chats/${options.characterId}/messages`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ text: options.text }),
   });
 }
 

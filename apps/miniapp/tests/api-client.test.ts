@@ -1,6 +1,12 @@
 import { describe, expect, it, vi } from "vitest";
 
-import { acceptExplicitConsent, createMemoryTokenStore, loadMiniAppState } from "../src/lib/api";
+import {
+  acceptExplicitConsent,
+  createMemoryTokenStore,
+  loadChatMessages,
+  loadMiniAppState,
+  sendChatMessage,
+} from "../src/lib/api";
 
 function jsonResponse(body: unknown, init: ResponseInit = {}) {
   return new Response(JSON.stringify(body), {
@@ -50,6 +56,22 @@ describe("Mini App API client", () => {
           messages: { used: 2, limit: 30, reset_at: 1234 },
           explicit_images: { used: 0, limit: 0, reset_at: 1234 },
         }),
+      )
+      .mockResolvedValueOnce(
+        jsonResponse({
+          items: [
+            {
+              id: "coach",
+              mode: "coach_premium",
+              title: "Coach",
+              category: "practice",
+              default_tier: "premium",
+              access: { allowed: false, reasons: ["premium_required"] },
+              last_message: null,
+              unread_count: 0,
+            },
+          ],
+        }),
       );
 
     const state = await loadMiniAppState({
@@ -81,6 +103,7 @@ describe("Mini App API client", () => {
     expect(tokenStore.get()).toEqual({ accessToken: "new-token", expiresAt: 999 });
     expect(state.me.user_id).toBe("42");
     expect(state.characters.items[0].mode).toBe("coach_premium");
+    expect(state.chats.items[0].id).toBe("coach");
     expect(state.entitlements.consent_required).toBe(true);
     vi.useRealTimers();
   });
@@ -140,6 +163,54 @@ describe("Mini App API client", () => {
       }),
     );
     expect(result.explicit_consent).toBe(true);
+  });
+
+  it("loads and sends per-persona Mini App chat messages", async () => {
+    const tokenStore = createMemoryTokenStore();
+    tokenStore.set({ accessToken: "session-token", expiresAt: 999 });
+    const fetchImpl = vi
+      .fn<typeof fetch>()
+      .mockResolvedValueOnce(jsonResponse({ items: [{ id: 1, role: "user", content: "hi", created_at: 10 }] }))
+      .mockResolvedValueOnce(
+        jsonResponse({
+          user_message: { id: 2, role: "user", content: "hello", created_at: 11 },
+          assistant_message: { id: 3, role: "assistant", content: "reply", created_at: 12 },
+          usage: { messages: { used: 1, limit: 30, reset_at: 1234 } },
+        }),
+      );
+
+    const messages = await loadChatMessages({
+      apiBaseUrl: "https://railway.example",
+      initData: "tg-init-data",
+      tokenStore,
+      fetchImpl,
+      characterId: "basic",
+    });
+    const sent = await sendChatMessage({
+      apiBaseUrl: "https://railway.example",
+      initData: "tg-init-data",
+      tokenStore,
+      fetchImpl,
+      characterId: "basic",
+      text: "hello",
+    });
+
+    expect(fetchImpl).toHaveBeenNthCalledWith(
+      1,
+      "https://railway.example/api/miniapp/chats/basic/messages",
+      expect.objectContaining({ headers: { Authorization: "Bearer session-token" } }),
+    );
+    expect(fetchImpl).toHaveBeenNthCalledWith(
+      2,
+      "https://railway.example/api/miniapp/chats/basic/messages",
+      expect.objectContaining({
+        method: "POST",
+        headers: { Authorization: "Bearer session-token", "Content-Type": "application/json" },
+        body: JSON.stringify({ text: "hello" }),
+      }),
+    );
+    expect(messages.items[0].content).toBe("hi");
+    expect(sent.assistant_message.content).toBe("reply");
   });
 
 });

@@ -5,6 +5,7 @@ import hmac
 import json
 import time
 from dataclasses import dataclass, field
+from typing import Any
 from urllib.parse import parse_qsl
 
 from fastapi import HTTPException, Request, status
@@ -48,6 +49,8 @@ class AppDependencies:
     repositories: SQLiteRepositories
     readiness: ReadinessState
     session_rate_limiter: SessionRateLimiter = field(default_factory=SessionRateLimiter)
+    chat_responder: Any = None
+    access_policy: Any = None
 
 
 def get_app_dependencies(request: Request) -> AppDependencies:

@@ -409,6 +409,33 @@ class SQLiteRepositories:
             conn.close()
         return [{"role": role, "content": content} for role, content in rows]
 
+    def load_history_records(
+        self,
+        user_ref: UserRef,
+        conversation_ref: ConversationRef,
+        mode: str,
+    ) -> list[dict[str, Any]]:
+        user_id = self._user_id(user_ref)
+        conn = self._connect()
+        try:
+            rows = conn.execute(
+                """
+                SELECT id, role, content, created_at
+                FROM user_messages
+                WHERE user_id = ?
+                  AND conversation_ref = ?
+                  AND mode = ?
+                ORDER BY id ASC
+                """,
+                (user_id, conversation_ref.value, mode),
+            ).fetchall()
+        finally:
+            conn.close()
+        return [
+            {"id": int(message_id), "role": str(role), "content": str(content), "created_at": int(created_at)}
+            for message_id, role, content, created_at in rows
+        ]
+
     def clear_history(
         self,
         user_ref: UserRef,

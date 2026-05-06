@@ -31,6 +31,20 @@ const initialState: MiniAppState = {
     messages: { used: 0, limit: 100, reset_at: 1234 },
     explicit_images: { used: 0, limit: 3, reset_at: 1234 },
   },
+  chats: {
+    items: [
+      {
+        id: "whore",
+        mode: "whore",
+        title: "Flirt 18+",
+        category: "explicit",
+        default_tier: "premium",
+        access: { allowed: false, reasons: ["explicit_consent_required"] },
+        last_message: null,
+        unread_count: 0,
+      },
+    ],
+  },
 };
 
 const updatedState: MiniAppState = {
@@ -38,11 +52,16 @@ const updatedState: MiniAppState = {
   characters: {
     items: initialState.characters.items.map((item) => ({ ...item, access: { allowed: true, reasons: [] } })),
   },
+  chats: {
+    items: initialState.chats.items.map((item) => ({ ...item, access: { allowed: true, reasons: [] } })),
+  },
   entitlements: { ...initialState.entitlements, explicit_consent: true, consent_required: false },
 };
 
 const loadMiniAppState = vi.fn();
 const acceptExplicitConsent = vi.fn();
+const loadChatMessages = vi.fn();
+const sendChatMessage = vi.fn();
 
 vi.mock("../src/lib/api", async (importOriginal) => {
   const actual = await importOriginal<typeof import("../src/lib/api")>();
@@ -50,6 +69,8 @@ vi.mock("../src/lib/api", async (importOriginal) => {
     ...actual,
     createBrowserTokenStore: () => actual.createMemoryTokenStore(),
     loadMiniAppState,
+    loadChatMessages,
+    sendChatMessage,
     acceptExplicitConsent,
   };
 });
@@ -60,6 +81,8 @@ describe("Mini App page", () => {
     vi.stubEnv("NEXT_PUBLIC_API_BASE_URL", "https://railway.example");
     loadMiniAppState.mockReset();
     acceptExplicitConsent.mockReset();
+    loadChatMessages.mockReset().mockResolvedValue({ items: [] });
+    sendChatMessage.mockReset();
     window.Telegram = { WebApp: { initData: "tg-init-data", ready: vi.fn(), expand: vi.fn() } };
   });
 
@@ -76,6 +99,7 @@ describe("Mini App page", () => {
 
     await waitFor(() => expect(loadMiniAppState).toHaveBeenCalledTimes(2));
     expect(screen.queryByText("18+ LOCKED")).not.toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "Chats" }));
     expect(screen.getAllByText("18+ OPEN").length).toBeGreaterThan(0);
   });
 

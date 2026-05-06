@@ -6,6 +6,7 @@ import time
 import pytest
 
 from src.core.contracts import AnalyticsEvent, AnalyticsEventType, ConversationStatus, DeferredJob, JobStatus, JobType, UserRef
+from src.core.chat_service import ensure_miniapp_conversation
 from src.db.migrations import migrate_database
 from src.db.repositories import SQLiteRepositories
 
@@ -65,6 +66,29 @@ def test_history_limit_applies_per_conversation_and_mode(tmp_path) -> None:
         {"role": "user", "content": "three"},
     ]
     assert repo.load_history(user_ref, conv.conversation_ref, "chef") == [{"role": "user", "content": "chef-only"}]
+
+
+def test_miniapp_conversations_are_deterministic_and_isolated_by_mode(tmp_path) -> None:
+    _, repo = _make_repo(tmp_path)
+    user_ref = UserRef("601")
+
+    basic = ensure_miniapp_conversation(repo, user_ref, "basic")
+    brainstorm = ensure_miniapp_conversation(repo, user_ref, "brainstorm")
+    same_basic = ensure_miniapp_conversation(repo, user_ref, "basic")
+
+    assert same_basic.conversation_ref == basic.conversation_ref
+    assert basic.conversation_ref.value == "miniapp:601:basic"
+    assert brainstorm.conversation_ref.value == "miniapp:601:brainstorm"
+
+    repo.append_history(user_ref, basic.conversation_ref, "basic", "user", "basic thread")
+    repo.append_history(user_ref, brainstorm.conversation_ref, "brainstorm", "user", "brainstorm thread")
+
+    assert repo.load_history(user_ref, basic.conversation_ref, "basic") == [
+        {"role": "user", "content": "basic thread"}
+    ]
+    assert repo.load_history(user_ref, brainstorm.conversation_ref, "brainstorm") == [
+        {"role": "user", "content": "brainstorm thread"}
+    ]
 
 
 def test_job_transitions_block_cancelled_to_completed_or_failed(tmp_path) -> None:

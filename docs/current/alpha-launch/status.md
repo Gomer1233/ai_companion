@@ -26,7 +26,7 @@
 - `ALPHA-008 Mini App Alpha` is merged to `main`.
 - `ALPHA-009 Compliance Completion + Alpha Ops` is merged to `main`.
 - `ALPHA-010 Deploy to Railway + Vercel + Supabase` is merged to `main`.
-- `ALPHA-011 Mini App Chat Foundation` is in progress as a post-deploy product correction for the Telegram Mini App.
+- `ALPHA-011 Mini App Chat Foundation` is ready for review as a post-deploy product correction for the Telegram Mini App.
 - Post-alpha standalone Web direction is captured as an accepted identity/readiness decision: `docs/adr/0002-user-identity-and-standalone-web-readiness.md`.
 
 ## Completed
@@ -149,10 +149,18 @@
   - proposed protected Railway API contract for chat list, per-persona history, and text send
   - frontend direction set to persona list plus active chat panel while keeping Access/Profile as secondary panels
   - follow-up Mini App backlog split into ALPHA-012 app shell/chat UX, ALPHA-013 image jobs, and ALPHA-014 product readiness/ops polish
+- `ALPHA-011` now adds:
+  - protected Mini App chat endpoints for chat list, per-persona history, and text send
+  - deterministic `miniapp:{user}:{mode}` conversation refs with repository-backed history records
+  - shared Mini App text-turn service that centralizes access checks, usage gating, history append, and provider routing
+  - backend tests for protected endpoints, per-persona history isolation, premium/explicit blocks, empty-message rejection, quota rejection, and exactly-once successful usage recording
+  - Next.js API client support for chat list/history/send
+  - Mini App chat-first surface with persona list, active message log, composer, locked states, usage-limit error state, and Access/Profile as secondary panels
+  - local verification passed: `python -m pytest -q`, `python -m ruff check .`, `python -m mypy`, `npm test -- --run`, `npm run typecheck`, and `npm run build`
 
 ## Next Step
 
-Implement `ALPHA-011 Mini App Chat Foundation`: add backend text chat endpoints, shared text-turn orchestration, per-persona history isolation, and a Mini App chat UI that can send/receive text without returning to Telegram.
+Review and merge `ALPHA-011 Mini App Chat Foundation`, then start `ALPHA-012 Mini App App Shell + Chat UX` after merge/status reconciliation.
 
 ## Risks / Notes
 
