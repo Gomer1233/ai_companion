@@ -197,6 +197,15 @@ describe("MiniApp", () => {
     expect(screen.getByRole("tabpanel", { name: "Support" })).toHaveTextContent("/support miniapp");
   });
 
+  it("keeps chat before the persona guide in DOM focus order", () => {
+    render(<MiniApp state={state} messagesByChat={{ basic: [] }} onAcceptExplicit={vi.fn()} onSendMessage={vi.fn()} />);
+
+    const chatPanel = screen.getByRole("region", { name: "Selected chat" });
+    const firstPersona = screen.getByRole("button", { name: "CH 001 AI Assistant" });
+
+    expect(chatPanel.compareDocumentPosition(firstPersona)).toBe(Node.DOCUMENT_POSITION_FOLLOWING);
+  });
+
   it("sends explicit locked selections to the consent contract", () => {
     render(<MiniApp state={state} messagesByChat={{ basic: [] }} onAcceptExplicit={vi.fn()} onSendMessage={vi.fn()} />);
 
