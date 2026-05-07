@@ -122,43 +122,6 @@ export function MiniApp({
 
       {activePanel === "chats" ? (
         <section className="chat-layout" id="channels" role="tabpanel" aria-label="Chats">
-          <div className="guide" aria-label="Chats">
-            {chats.map((item, index) => {
-              const number = channelNumber(index);
-              const isSelected = item.id === selected?.id;
-              return (
-                <button
-                  aria-label={`${number} ${item.title}`}
-                  aria-pressed={isSelected}
-                  className={`channel-row ${item.category === "explicit" ? "restricted" : ""} ${isSelected ? "selected" : ""}`}
-                  key={item.id}
-                  type="button"
-                  onClick={() => handleSelect(item)}
-                >
-                  <span className="channel-number">{number}</span>
-                  <span className="channel-thumb" aria-hidden="true">
-                    {channelInitial(item.title)}
-                  </span>
-                  <span className="channel-copy">
-                    <span className="channel-title">{item.title}</span>
-                    <span className="channel-description">{item.last_message?.content ?? channelHint(item.category)}</span>
-                  </span>
-                  <span className="badges">
-                    {item.default_tier === "premium" ? (
-                      <span className="badge vip">VIP</span>
-                    ) : (
-                      <span className="badge">FREE</span>
-                    )}
-                    {!item.access.allowed ? <span className="badge">LOCKED</span> : null}
-                    {item.category === "explicit" ? (
-                      <span className="badge danger">{item.access.allowed ? "18+ OPEN" : "18+ LOCKED"}</span>
-                    ) : null}
-                    {item.unread_count > 0 ? <span className="badge">{item.unread_count}</span> : null}
-                  </span>
-                </button>
-              );
-            })}
-          </div>
           <section className={`chat-panel ${selected?.access.allowed ? "" : "scrambled"}`} aria-label="Selected chat">
             <div className="preview-topline">
               <span className="tracking" data-testid="selected-channel-number">
@@ -218,6 +181,43 @@ export function MiniApp({
               </button>
             </form>
           </section>
+          <div className="guide" aria-label="Chats">
+            {chats.map((item, index) => {
+              const number = channelNumber(index);
+              const isSelected = item.id === selected?.id;
+              return (
+                <button
+                  aria-label={`${number} ${item.title}`}
+                  aria-pressed={isSelected}
+                  className={`channel-row ${item.category === "explicit" ? "restricted" : ""} ${isSelected ? "selected" : ""}`}
+                  key={item.id}
+                  type="button"
+                  onClick={() => handleSelect(item)}
+                >
+                  <span className="channel-number">{number}</span>
+                  <span className="channel-thumb" aria-hidden="true">
+                    {channelInitial(item.title)}
+                  </span>
+                  <span className="channel-copy">
+                    <span className="channel-title">{item.title}</span>
+                    <span className="channel-description">{item.last_message?.content ?? channelHint(item.category)}</span>
+                  </span>
+                  <span className="badges">
+                    {item.default_tier === "premium" ? (
+                      <span className="badge vip">VIP</span>
+                    ) : (
+                      <span className="badge">FREE</span>
+                    )}
+                    {!item.access.allowed ? <span className="badge">LOCKED</span> : null}
+                    {item.category === "explicit" ? (
+                      <span className="badge danger">{item.access.allowed ? "18+ OPEN" : "18+ LOCKED"}</span>
+                    ) : null}
+                    {item.unread_count > 0 ? <span className="badge">{item.unread_count}</span> : null}
+                  </span>
+                </button>
+              );
+            })}
+          </div>
         </section>
       ) : null}
 
