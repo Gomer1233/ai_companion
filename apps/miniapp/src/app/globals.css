@@ -296,13 +296,11 @@ button {
 }
 
 .chat-layout .guide {
-  order: 1;
   margin-top: 0;
   align-content: start;
 }
 
 .chat-panel {
-  order: 2;
   min-height: 420px;
   display: grid;
   grid-template-rows: auto auto minmax(180px, 1fr) auto auto;
@@ -570,11 +568,6 @@ button {
 
   .chat-layout {
     grid-template-columns: 1fr;
-  }
-
-  .chat-layout .guide,
-  .chat-panel {
-    order: initial;
   }
 
   .chat-panel {
